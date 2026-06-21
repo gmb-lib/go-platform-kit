@@ -6,7 +6,7 @@ import (
 	"azugo.io/core/validation"
 	"github.com/go-quicktest/qt"
 
-	"github.com/gmb-sig/go-platform-kit/config"
+	"github.com/gmb-lib/go-platform-kit/config"
 )
 
 // newBase returns a BaseConfiguration with the standard fields set to valid

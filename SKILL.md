@@ -1,6 +1,6 @@
 ---
 name: go-platform-kit
-description: Conventions for using github.com/gmb-sig/go-platform-kit — the thin, project-specific glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements the azugo-framework skill (it does not replace it).
+description: Conventions for using github.com/gmb-lib/go-platform-kit — the thin, project-specific glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements the azugo-framework skill (it does not replace it).
 ---
 
 # go-platform-kit — Project Glue Over Azugo
@@ -14,7 +14,7 @@ configures and wraps them.
 > Read the **azugo-framework** skill first for app/route/config/handler structure. This
 > skill only covers the `go-platform-kit` delta on top of it.
 
-Module: `github.com/gmb-sig/go-platform-kit` · Pinned to `azugo.io/azugo` + `azugo.io/core`
+Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` + `azugo.io/core`
 + `azugo.io/opentelemetry` **v0.32.x** (bumped here once, inherited transitively).
 
 ---
@@ -43,7 +43,7 @@ correlation middleware installed — no copy-paste.
 import (
     "azugo.io/azugo"
     "azugo.io/azugo/server"
-    "github.com/gmb-sig/go-platform-kit/platform"
+    "github.com/gmb-lib/go-platform-kit/platform"
 )
 
 func New(cmd *cobra.Command, version string) (*App, error) {
@@ -92,7 +92,7 @@ the standard fleet env and already satisfies Azugo's `Configurable` (promoted
 
 ```go
 import (
-    pkconfig "github.com/gmb-sig/go-platform-kit/config"
+    pkconfig "github.com/gmb-lib/go-platform-kit/config"
     "azugo.io/core/validation"
     "github.com/spf13/viper"
 )
@@ -159,7 +159,7 @@ and echoes `X-Correlation-ID` on the response.
 In handlers, read the ids and pass them onward:
 
 ```go
-import "github.com/gmb-sig/go-platform-kit/correlation"
+import "github.com/gmb-lib/go-platform-kit/correlation"
 
 func (r *router) handler(ctx *azugo.Context) {
     cid := correlation.ID(ctx)          // the correlation id
@@ -181,7 +181,7 @@ to consistent HTTP responses. Pass the mapped error to `ctx.Error(err)` — Azug
 the status and safe message. **Never** return a raw DB error to the client.
 
 ```go
-import pkerrors "github.com/gmb-sig/go-platform-kit/errors"
+import pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 
 func (r *router) getDocument(ctx *azugo.Context) {
     doc, code, err := r.Store().GetDocument(ctx, ctx.Params.String("id"))
@@ -212,7 +212,7 @@ For service-to-service calls use `ctx.HTTPClient()`, not a hand-rolled client.
 automatically by `azugo.io/opentelemetry`; `go-authbyte` adds the DPoP-bound token.
 
 ```go
-import "github.com/gmb-sig/go-platform-kit/httpclient"
+import "github.com/gmb-lib/go-platform-kit/httpclient"
 
 func (c *DocumentClient) Fetch(ctx *azugo.Context, id string) (*Doc, error) {
     client := httpclient.Outbound(ctx, c.baseURL) // == ctx.HTTPClient().WithBaseURL(...)
@@ -233,7 +233,7 @@ Service-to-service hops then continue the same trace; external hops show up in t
 service graph.
 
 ```go
-import "github.com/gmb-sig/go-platform-kit/observability"
+import "github.com/gmb-lib/go-platform-kit/observability"
 
 // Instrument a service's own client in place (allocates one when nil):
 client := observability.InstrumentHTTPClient(&http.Client{Timeout: 10 * time.Second})
@@ -259,7 +259,7 @@ correlation/trace ids, validates, and strips any bearer-token-shaped attributes 
 **events carry correlation, never tokens**.
 
 ```go
-import "github.com/gmb-sig/go-platform-kit/broker"
+import "github.com/gmb-lib/go-platform-kit/broker"
 
 pub := broker.NewPublisher(transport, cfg.ServiceName) // transport: your broker client
 
@@ -299,7 +299,7 @@ that talk to NATS (producers + sinks); services that don't never pull the depend
 the core `broker` package stays client-free.
 
 ```go
-import "github.com/gmb-sig/go-platform-kit/broker/natsbroker"
+import "github.com/gmb-lib/go-platform-kit/broker/natsbroker"
 
 // Producer: publish over JetStream (Msg-Id = event id → server-side dedup backstop).
 conn, _ := natsbroker.Connect(natsbroker.Config{URL: cfg.Broker.URL, Name: cfg.ServiceName})

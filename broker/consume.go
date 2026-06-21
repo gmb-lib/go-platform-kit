@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gmb-sig/go-platform-kit/observability"
+	"github.com/gmb-lib/go-platform-kit/observability"
 )
 
 // Handler processes a decoded event. The broker is assumed at-least-once

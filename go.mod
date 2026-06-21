@@ -1,4 +1,4 @@
-module github.com/gmb-sig/go-platform-kit
+module github.com/gmb-lib/go-platform-kit
 
 go 1.26
 

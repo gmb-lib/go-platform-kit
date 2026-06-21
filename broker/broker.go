@@ -11,8 +11,8 @@ import (
 	"azugo.io/azugo"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/gmb-sig/go-platform-kit/correlation"
-	"github.com/gmb-sig/go-platform-kit/observability"
+	"github.com/gmb-lib/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/observability"
 )
 
 // now returns the current time in UTC. occurred_at is a high-precision,

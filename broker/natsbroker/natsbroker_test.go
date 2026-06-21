@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-quicktest/qt"
 
-	"github.com/gmb-sig/go-platform-kit/broker"
+	"github.com/gmb-lib/go-platform-kit/broker"
 )
 
 func TestConnect_EmptyURL(t *testing.T) {

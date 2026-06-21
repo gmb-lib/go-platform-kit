@@ -8,7 +8,7 @@ import (
 	"github.com/go-quicktest/qt"
 	"github.com/valyala/fasthttp"
 
-	"github.com/gmb-sig/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/correlation"
 )
 
 func TestValidID(t *testing.T) {

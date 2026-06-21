@@ -21,9 +21,9 @@ import (
 
 	"azugo.io/azugo"
 
-	"github.com/gmb-sig/go-platform-kit/config"
-	"github.com/gmb-sig/go-platform-kit/correlation"
-	"github.com/gmb-sig/go-platform-kit/observability"
+	"github.com/gmb-lib/go-platform-kit/config"
+	"github.com/gmb-lib/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/observability"
 )
 
 // Options configures Setup.

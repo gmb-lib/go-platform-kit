@@ -16,7 +16,7 @@ import (
 	"azugo.io/azugo"
 	"azugo.io/core/http"
 
-	"github.com/gmb-sig/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/correlation"
 )
 
 // Default transport conventions. Per-request deadlines still come from the

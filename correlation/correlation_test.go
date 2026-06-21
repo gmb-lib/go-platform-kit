@@ -10,9 +10,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/gmb-sig/go-platform-kit/broker"
-	"github.com/gmb-sig/go-platform-kit/correlation"
-	"github.com/gmb-sig/go-platform-kit/httpclient"
+	"github.com/gmb-lib/go-platform-kit/broker"
+	"github.com/gmb-lib/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/httpclient"
 )
 
 // TestPropagation_EndToEnd covers inbound id → ctx → outbound header option →

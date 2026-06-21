@@ -25,7 +25,7 @@ never national identifiers, names, or e-mail addresses.
 ## Install
 
 ```sh
-go get github.com/gmb-sig/go-platform-kit
+go get github.com/gmb-lib/go-platform-kit
 ```
 
 Pinned in lockstep to `azugo.io/azugo`, `azugo.io/core`, and `azugo.io/opentelemetry`.

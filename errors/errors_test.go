@@ -6,7 +6,7 @@ import (
 	"github.com/go-quicktest/qt"
 	"github.com/valyala/fasthttp"
 
-	pkerrors "github.com/gmb-sig/go-platform-kit/errors"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 )
 
 // statusCoder mirrors Azugo's ResponseStatusCode interface so tests can assert

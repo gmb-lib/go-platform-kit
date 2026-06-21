@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gmb-sig/go-platform-kit/broker"
+	"github.com/gmb-lib/go-platform-kit/broker"
 )
 
 // frozenEnvelopeKeys is the append-only contract for the event envelope: every
