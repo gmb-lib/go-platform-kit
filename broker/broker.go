@@ -54,7 +54,9 @@ func NewPublisher(transport Transport, service string) *Publisher {
 // Publish stamps, validates, and publishes an event to topic. It mutates ev to
 // fill in the event id, occurrence time, and correlation/trace ids from the
 // request when they are not already set, so callers only supply the event's
-// own content.
+// own content. It is the request-path entry point; a background drainer that
+// republishes an already-stamped envelope from a plain context uses
+// PublishStamped instead.
 func (p *Publisher) Publish(ctx *azugo.Context, topic string, ev *Envelope) error {
 	if p == nil || p.transport == nil {
 		return errors.New("broker: publisher has no transport")
@@ -65,6 +67,26 @@ func (p *Publisher) Publish(ctx *azugo.Context, topic string, ev *Envelope) erro
 	}
 
 	Stamp(ctx, ev)
+
+	return p.PublishStamped(ctx, topic, ev)
+}
+
+// PublishStamped validates and publishes an ALREADY-STAMPED envelope to topic
+// from a plain context — the path a background outbox drainer takes, where no
+// *azugo.Context (and so no Stamp) is available. Unlike Publish it does NOT
+// stamp: the caller MUST have called Stamp on the request path so event_id,
+// occurred_at and correlation/trace reflect the originating request, not the
+// drain. Validate rejects an unstamped envelope (missing event_id / occurred_at),
+// so accidental misuse fails closed rather than emitting an undated,
+// uncorrelated event. It records the same publish metric as Publish.
+func (p *Publisher) PublishStamped(ctx context.Context, topic string, ev *Envelope) error {
+	if p == nil || p.transport == nil {
+		return errors.New("broker: publisher has no transport")
+	}
+
+	if ev == nil {
+		return errors.New("broker: nil envelope")
+	}
 
 	if err := ev.Validate(); err != nil {
 		return err

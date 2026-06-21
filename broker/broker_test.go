@@ -126,6 +126,47 @@ func TestPublisher_Publish(t *testing.T) {
 	qt.Check(t, qt.Equals(decoded.EventType, "envelope.completed"))
 }
 
+// TestPublisher_PublishStamped_PreservesStamp proves the background-drain path:
+// an envelope stamped on the request path keeps its event_id + occurred_at when
+// republished later from a PLAIN context (no *azugo.Context), so a deferred
+// publish does not shift the event time or re-mint the id.
+func TestPublisher_PublishStamped_PreservesStamp(t *testing.T) {
+	tr := &publishedTransport{}
+	pub := broker.NewPublisher(tr, "envelope-svc")
+
+	// Stamp on the request path, then forget the *azugo.Context.
+	var ev *broker.Envelope
+	withCtx(t, func(ctx *azugo.Context) {
+		ev = validEnvelope()
+		broker.Stamp(ctx, ev)
+	})
+
+	wantID := ev.EventID
+	wantAt := ev.OccurredAt
+
+	// Republish from a plain background context, as the drainer would.
+	qt.Assert(t, qt.IsNil(pub.PublishStamped(context.Background(), "signing.events", ev)))
+	qt.Check(t, qt.Equals(tr.key, wantID)) // partition key unchanged
+
+	decoded := &broker.Envelope{}
+	qt.Assert(t, qt.IsNil(json.Unmarshal(tr.payload, decoded)))
+	qt.Check(t, qt.Equals(decoded.EventID, wantID))           // id not re-minted
+	qt.Check(t, qt.IsTrue(decoded.OccurredAt.Equal(wantAt)))  // time not shifted
+}
+
+// TestPublisher_PublishStamped_RejectsUnstamped proves PublishStamped does NOT
+// stamp: an unstamped envelope (no event_id / occurred_at) fails Validate and is
+// not published, so misuse fails closed rather than emitting an undated event.
+func TestPublisher_PublishStamped_RejectsUnstamped(t *testing.T) {
+	tr := &publishedTransport{}
+	pub := broker.NewPublisher(tr, "envelope-svc")
+
+	err := pub.PublishStamped(context.Background(), "signing.events", validEnvelope())
+
+	qt.Check(t, qt.IsNotNil(err))            // rejected by Validate
+	qt.Check(t, qt.Equals(len(tr.payload), 0)) // nothing published
+}
+
 func TestDispatch_Idempotent(t *testing.T) {
 	tr := &publishedTransport{}
 	pub := broker.NewPublisher(tr, "envelope-svc")
