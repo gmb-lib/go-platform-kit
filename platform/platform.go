@@ -23,6 +23,7 @@ import (
 
 	"github.com/gmb-lib/go-platform-kit/config"
 	"github.com/gmb-lib/go-platform-kit/correlation"
+	pkerrors "github.com/gmb-lib/go-platform-kit/errors"
 	"github.com/gmb-lib/go-platform-kit/observability"
 )
 
@@ -36,6 +37,14 @@ type Options struct {
 	// Redaction overrides the log redaction policy. When nil, the fleet-standard
 	// observability.DefaultRedactionPolicy is used. Redaction is always enabled.
 	Redaction *observability.RedactionPolicy
+
+	// PublicErrors installs the error renderer in public-boundary mode: every
+	// error response is projected to the public envelope — the internal source
+	// and hop chain are stripped and the detail is withheld unless marked
+	// public-safe. Set it only on the single public-facing service (the BFF);
+	// internal services leave it false so service-to-service errors carry the
+	// full envelope for relay and logging.
+	PublicErrors bool
 }
 
 // Setup wires the cross-cutting concerns onto app, in the order they must run:
@@ -73,6 +82,14 @@ func Setup(app *azugo.App, opts Options) error {
 	// after the tracing middleware (registered in step 1) so trace_id/span_id
 	// are available to bind alongside correlation_id.
 	app.Use(correlation.Middleware())
+
+	// 4. Uniform error envelope (RFC 9457). One global handler renders every
+	// error — produced here or relayed from downstream — as
+	// application/problem+json with a stable code, this service as the source,
+	// and the request trace id, replacing both the hand-rolled error bodies and
+	// the framework's default error shape. app.AppName is the same service id
+	// already stamped on every log line, so the source has a single origin.
+	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, opts.PublicErrors)
 
 	return nil
 }
