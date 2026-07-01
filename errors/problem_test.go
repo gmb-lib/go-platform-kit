@@ -24,6 +24,16 @@ func TestNewProblem_UnknownCodeIsSafe500(t *testing.T) {
 	qt.Check(t, qt.Equals(p.Title, "Internal server error"))
 }
 
+func TestNewProblem_TitleFollowsStatusForUnknownReason(t *testing.T) {
+	// A domain-specific reason outside the taxonomy (legalHold) has no derived
+	// title, so it follows the overridden status rather than defaulting to the
+	// 500 title — the emitter keeps the precise code without a misleading title.
+	p := NewProblem("err:document:legalHold", WithStatus(fasthttp.StatusConflict))
+
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusConflict))
+	qt.Check(t, qt.Equals(p.Title, "Conflict"))
+}
+
 func TestNewProblem_Options(t *testing.T) {
 	p := NewProblem("err:document:notFound",
 		WithStatus(fasthttp.StatusGone),

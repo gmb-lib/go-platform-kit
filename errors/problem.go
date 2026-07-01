@@ -210,7 +210,12 @@ func NewProblem(code string, opts ...ProblemOption) *Problem {
 	p := &Problem{
 		Code:   code,
 		Status: statusForCode(code),
-		Title:  titleForCode(code),
+	}
+	// Derive a title only for a recognized taxonomy reason; otherwise leave it
+	// empty so it follows the final (possibly overridden) status below, rather
+	// than misleadingly defaulting to the 500 title for a domain-specific reason.
+	if title, ok := titleForCodeOK(code); ok {
+		p.Title = title
 	}
 
 	for _, opt := range opts {
@@ -239,35 +244,41 @@ func statusForCode(code string) int {
 	return fasthttp.StatusInternalServerError
 }
 
-// titleForCode derives the stable title from a code's reason.
-func titleForCode(code string) string {
-	if c, ok := ParseCode(code); ok {
-		return titleForReason(c.Reason)
+// titleForCodeOK derives the stable title from a code's reason. ok is false when
+// the code is unparseable or its reason is not a recognized taxonomy reason, so
+// the caller falls back to a status-derived title instead of a misleading one
+// (e.g. a domain-specific reason such as legalHold carried with an overridden
+// status).
+func titleForCodeOK(code string) (string, bool) {
+	c, ok := ParseCode(code)
+	if !ok {
+		return "", false
 	}
 
-	return titleForStatus(fasthttp.StatusInternalServerError)
+	return titleForReasonOK(c.Reason)
 }
 
-// titleForReason maps a taxonomy reason to a stable, human-readable title,
+// titleForReasonOK maps a taxonomy reason to a stable, human-readable title,
 // using the same normalization as the status mapping so the two never diverge.
-func titleForReason(reason string) string {
+// ok is false for an unrecognized reason (the title then follows the status).
+func titleForReasonOK(reason string) (string, bool) {
 	switch normalize(reason) {
 	case "notfound", "missing", "unknown", "doesnotexist":
-		return "Not found"
+		return "Not found", true
 	case "forbidden", "accessdenied", "denied", "notallowed", "notpermitted":
-		return "Forbidden"
+		return "Forbidden", true
 	case "unauthorized", "unauthenticated":
-		return "Unauthorized"
+		return "Unauthorized", true
 	case "conflict", "alreadyexists", "duplicate", "exists":
-		return "Conflict"
+		return "Conflict", true
 	case "gone", "expired", "revoked":
-		return "No longer available"
+		return "No longer available", true
 	case "invalid", "validation", "malformed", "badrequest", "badinput":
-		return "Invalid request"
+		return "Invalid request", true
 	case "required", "missingparameter", "missingfield":
-		return "Missing required parameter"
+		return "Missing required parameter", true
 	default:
-		return titleForStatus(fasthttp.StatusInternalServerError)
+		return "", false
 	}
 }
 

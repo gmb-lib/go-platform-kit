@@ -8,6 +8,7 @@ import (
 	"azugo.io/core/http"
 	"github.com/go-playground/validator/v10"
 	"github.com/valyala/fasthttp"
+	"go.uber.org/zap"
 
 	"github.com/gmb-lib/go-platform-kit/correlation"
 )
@@ -41,6 +42,12 @@ func Handler(source string, public bool) func(*azugo.Context, error) bool {
 		if p.TraceID == "" {
 			p.TraceID = traceThread(ctx)
 		}
+
+		// One structured, correlated error record per rendered error — the
+		// correlation id and trace id ride ctx.Log(). This is the uniform error
+		// log: it fires even when the handler wrote none, so an error is always
+		// joinable to its request by code + trace id.
+		logProblem(ctx, p)
 
 		ctx.StatusCode(p.StatusCode())
 
@@ -132,8 +139,8 @@ func normalized(p *Problem) *Problem {
 	}
 
 	if p.Title == "" {
-		if _, ok := ParseCode(p.Code); ok {
-			p.Title = titleForCode(p.Code)
+		if title, ok := titleForCodeOK(p.Code); ok {
+			p.Title = title
 		} else {
 			p.Title = titleForStatus(p.Status)
 		}
@@ -169,4 +176,29 @@ func traceThread(ctx *azugo.Context) string {
 	}
 
 	return ids.CorrelationID
+}
+
+// logProblem emits the uniform error log line for a rendered error. Server
+// errors (5xx) log at Error, client errors (4xx) at Warn, so a level>=error
+// view surfaces only genuine failures. The correlation id, trace id, and span
+// id are added by the correlation middleware (they ride ctx.Log()); this adds
+// the error specifics. detail is a SafeError, so it never leaks to the logs.
+func logProblem(ctx *azugo.Context, p *Problem) {
+	fields := make([]zap.Field, 0, 4)
+	fields = append(fields,
+		zap.String("error.code", p.Code),
+		zap.Int("http.response.status_code", p.Status),
+	)
+	if p.Source != "" {
+		fields = append(fields, zap.String("error.source", p.Source))
+	}
+	if p.Detail != "" {
+		fields = append(fields, zap.String("error.detail", p.Detail))
+	}
+
+	if p.Status >= fasthttp.StatusInternalServerError {
+		ctx.Log().Error("request error", fields...)
+	} else {
+		ctx.Log().Warn("request error", fields...)
+	}
 }

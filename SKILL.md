@@ -1,6 +1,6 @@
 ---
 name: go-platform-kit
-description: Conventions for using github.com/gmb-lib/go-platform-kit — the thin, project-specific glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements the azugo-framework skill (it does not replace it).
+description: Conventions for using github.com/gmb-lib/go-platform-kit — the thin glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements the azugo-framework skill (it does not replace it).
 ---
 
 # go-platform-kit — Project Glue Over Azugo

@@ -83,8 +83,11 @@ func Middleware() azugo.RequestHandlerFunc {
 			}
 
 			ctx.SetUserValue(propagation.RequestValueName(), cid)
-			// Echo it back so callers can correlate the response.
-			ctx.Header.Set(HeaderCorrelationID, cid)
+			// Echo it back so callers can correlate the response. SetAlways (not
+			// Set) so it survives the response reset the framework performs when
+			// rendering an error — otherwise error responses, the ones a caller
+			// most wants to correlate, would drop the header.
+			ctx.Header.SetAlways(HeaderCorrelationID, cid)
 
 			// 2. Ensure all available ids appear on every subsequent log line.
 			fields := make([]zap.Field, 0, 3)
