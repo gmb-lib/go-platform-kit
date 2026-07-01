@@ -18,13 +18,18 @@ import (
 	"github.com/oklog/ulid/v2"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+
+	"github.com/gmb-lib/go-platform-kit/propagation"
 )
 
 // Header names carrying correlation across HTTP hops. The W3C `traceparent`
 // header is injected/extracted by azugo.io/opentelemetry; correlation_id is ours.
 const (
-	// HeaderCorrelationID is the inbound/outbound correlation id header.
-	HeaderCorrelationID = "X-Correlation-ID"
+	// HeaderCorrelationID is the inbound/outbound correlation id header. It is
+	// defined by the dependency-free propagation leaf so the request middleware
+	// and every outbound client (including the on-behalf/background client that
+	// cannot import this package) share one name.
+	HeaderCorrelationID = propagation.HeaderCorrelationID
 )
 
 // Log field keys. These are the canonical names that appear in every log line
@@ -34,10 +39,6 @@ const (
 	LogKeyTraceID       = "trace_id"
 	LogKeySpanID        = "span_id"
 )
-
-// ctxKeyCorrelationID is the per-request context key under which the resolved
-// correlation id is stored on *azugo.Context.
-const ctxKeyCorrelationID = "platform.correlation_id"
 
 // MaxIDLength bounds an accepted inbound correlation id. Longer (or otherwise
 // invalid) inbound values are ignored and a fresh id is used instead — the
@@ -81,7 +82,7 @@ func Middleware() azugo.RequestHandlerFunc {
 				cid = newID()
 			}
 
-			ctx.SetUserValue(ctxKeyCorrelationID, cid)
+			ctx.SetUserValue(propagation.RequestValueName(), cid)
 			// Echo it back so callers can correlate the response.
 			ctx.Header.Set(HeaderCorrelationID, cid)
 
@@ -120,7 +121,7 @@ func FromContext(ctx *azugo.Context) IDs {
 // ID returns the correlation id bound to the request, or "" if Middleware has
 // not run.
 func ID(ctx *azugo.Context) string {
-	if v, ok := ctx.UserValue(ctxKeyCorrelationID).(string); ok {
+	if v, ok := ctx.UserValue(propagation.RequestValueName()).(string); ok {
 		return v
 	}
 
