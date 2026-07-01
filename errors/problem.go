@@ -298,10 +298,16 @@ func titleForStatus(status int) string {
 		return "Conflict"
 	case fasthttp.StatusGone:
 		return "No longer available"
+	case fasthttp.StatusRequestEntityTooLarge:
+		return "Payload too large"
+	case fasthttp.StatusUnsupportedMediaType:
+		return "Unsupported media type"
 	case fasthttp.StatusUnprocessableEntity:
 		return "Unprocessable entity"
 	case fasthttp.StatusTooManyRequests:
 		return "Too many requests"
+	case fasthttp.StatusNotImplemented:
+		return "Not implemented"
 	case fasthttp.StatusBadGateway:
 		return "Upstream unavailable"
 	case fasthttp.StatusServiceUnavailable:
@@ -331,10 +337,16 @@ func genericCodeForStatus(status int) string {
 		return "err:request:conflict"
 	case fasthttp.StatusGone:
 		return "err:request:gone"
+	case fasthttp.StatusRequestEntityTooLarge:
+		return "err:request:payloadTooLarge"
+	case fasthttp.StatusUnsupportedMediaType:
+		return "err:request:unsupportedMediaType"
 	case fasthttp.StatusUnprocessableEntity:
 		return "err:request:unprocessable"
 	case fasthttp.StatusTooManyRequests:
 		return "err:request:rateLimited"
+	case fasthttp.StatusNotImplemented:
+		return "err:internal:notImplemented"
 	case fasthttp.StatusBadGateway, fasthttp.StatusServiceUnavailable, fasthttp.StatusGatewayTimeout:
 		return "err:upstream:unavailable"
 	default:
