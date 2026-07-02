@@ -1,11 +1,15 @@
 package platform_test
 
 import (
+	"context"
 	"testing"
 
 	"azugo.io/azugo"
+	"azugo.io/opentelemetry"
 	"github.com/go-quicktest/qt"
 	"github.com/valyala/fasthttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gmb-lib/go-platform-kit/config"
 	"github.com/gmb-lib/go-platform-kit/correlation"
@@ -80,4 +84,25 @@ func TestSetup_PublicErrorsStripsSourceAndChain(t *testing.T) {
 	body, err := resp.BodyUncompressed()
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.Not(qt.StringContains(string(body), `"source"`)))
+}
+
+// noopRecorder is a minimal InstrumentationRecorderFunc stand-in for a
+// service's custom instrumentation (e.g. DB query tracing).
+func noopRecorder(_ context.Context, _ trace.Tracer, _ propagation.TextMapPropagator, _ opentelemetry.InstrumentationSpanNameFormatter, _ string, _ ...any) (func(err error), bool) {
+	return nil, false
+}
+
+func TestSetup_ForwardsTracingOptions(t *testing.T) {
+	app := azugo.NewTestApp()
+	app.AppName = "document-svc"
+
+	// A service with a custom instrumentation recorder (e.g. jsondb DB query
+	// tracing) must be able to keep it while adopting Setup.
+	err := platform.Setup(app.App, platform.Options{
+		Config: config.New(),
+		TracingOptions: []opentelemetry.Option{
+			opentelemetry.InstrumentationRecorder("db", noopRecorder),
+		},
+	})
+	qt.Assert(t, qt.IsNil(err))
 }
