@@ -14,8 +14,9 @@ configures and wraps them.
 > Read the **azugo-framework** skill first for app/route/config/handler structure. This
 > skill only covers the `go-platform-kit` delta on top of it.
 
-Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` + `azugo.io/core`
-+ `azugo.io/opentelemetry` **v0.32.x** (bumped here once, inherited transitively).
+Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.34.x** +
+`azugo.io/core` **v0.34.x** + `azugo.io/opentelemetry` **v0.33.x** (bumped here once, inherited
+transitively).
 
 ---
 
@@ -27,9 +28,10 @@ Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` + `az
 | `…/config` | `BaseConfiguration` (embeds Azugo config) + the standard env |
 | `…/observability` | logger redaction, metric naming helpers, `EnableTracing`, outbound HTTP-client tracing |
 | `…/correlation` | `correlation_id`/`trace_id` middleware + context helpers |
-| `…/errors` | error taxonomy + `err:domain:reason` → Azugo HTTP error mapping |
+| `…/errors` | the RFC 9457 `problem+json` envelope (`Problem`/`PublicProblem`), produce (`NewProblem`) + relay (`ParseProblem`/`Relay`), the uniform renderer, and the `err:domain:reason` taxonomy |
 | `…/broker` | `Publisher`/`Consumer` over the frozen event envelope |
 | `…/httpclient` | outbound defaults + correlation header propagation |
+| `…/propagation` | dependency-free leaf (stdlib only): carries the correlation id across a hop that only sees a `context.Context` — the on-behalf/DPoP client and background jobs |
 
 ---
 
@@ -79,8 +81,13 @@ func (a *App) init() error {
 ```
 
 `Setup` wires, in order: **(1)** OpenTelemetry tracing (so trace ids exist), **(2)** log
-redaction, **(3)** the correlation middleware. Call it **before** registering service
-routes so correlation wraps them.
+redaction, **(3)** the correlation middleware, and **(4)** the uniform error renderer (§4) — so
+every error response is one `application/problem+json` envelope, logged once and correlated. Call
+it **before** registering service routes so correlation and the renderer wrap them.
+
+Set `Options.PublicErrors: true` on the **one** public-facing boundary service (e.g. a BFF) so its
+error responses are projected to the public shape (`source`/`chain` dropped); leave it `false` on
+internal services so they return the full envelope for relay + logging (§4).
 
 ---
 
@@ -150,11 +157,15 @@ id (`ctx.ID()`)** rather than a parallel ULID — adopts the OTel `trace_id`/`sp
 binds all three to the context, **adds them to every log line emitted via `ctx.Log()`**,
 and echoes `X-Correlation-ID` on the response.
 
-> Note: Azugo's built-in **access log** (`middleware.RequestLogger`) writes through the
-> *app* logger, not `ctx.Log()`, so it carries only its own `http.request.id` — which,
-> because the kit adopts `ctx.ID()`, holds the *same value* as `correlation_id`. So one id
-> still joins the access log to every handler/audit line; correlation appears as a named
-> `correlation_id` field on the latter.
+> Note: Azugo's built-in **access log** (`middleware.RequestLogger`) writes through the *app*
+> logger, not `ctx.Log()`, so it carries only its own `http.request.id`, never a
+> `correlation_id`/`trace_id` field. On the **entry** service that id *equals* `correlation_id`
+> (the kit adopts `ctx.ID()`), so it joins the access line to the handler/audit lines. On a
+> **downstream** hop — where an inbound `X-Correlation-ID` is present — `correlation_id` is that
+> threaded value while the access line keeps the service's *own* `ctx.ID()`, so the two
+> **diverge** and the access line is not joinable by the propagated id there. The reliable
+> cross-service key is a `ctx.Log()` line (handler or the rendered error), which carries **both**
+> the local `http.request.id` and the threaded `correlation_id`/`trace_id`.
 
 In handlers, read the ids and pass them onward:
 
@@ -174,34 +185,104 @@ traces, and all three audit regimes. **Do not** build your own request-id scheme
 
 ---
 
-## 4. Errors — taxonomy & DB result-code mapping
+## 4. Errors — one uniform envelope (RFC 9457 problem+json)
 
-Map the DB layer's namespaced result codes (`result_error('err:document:notFound', …)`)
-to consistent HTTP responses. Pass the mapped error to `ctx.Error(err)` — Azugo derives
-the status and safe message. **Never** return a raw DB error to the client.
+`platform.Setup` installs a renderer so **every** error response — your own or one relayed from
+downstream — is a single `application/problem+json` envelope (RFC 9457). There is exactly one
+wire shape; never hand-roll an error body or a second envelope. The envelope carries a stable
+machine `code` (`err:domain:reason`), a human `title`, the `status`, an optional safe `detail`,
+the originating `source`, the `trace_id`, and a bounded hop `chain`. The renderer also **logs
+every error once, correlated** (code + status + trace id, via `ctx.Log()`; 5xx at `Error`, 4xx at
+`Warn`), so a failure is always joinable to its request even when the handler logged nothing.
 
 ```go
 import pkerrors "github.com/gmb-lib/go-platform-kit/errors"
+```
 
-func (r *router) getDocument(ctx *azugo.Context) {
-    doc, code, err := r.Store().GetDocument(ctx, ctx.Params.String("id"))
-    if err != nil {
-        ctx.Error(err) // unexpected — 500, logged, no leak
-        return
-    }
-    if code != "" {
-        ctx.Error(pkerrors.FromResultCode(code)) // e.g. err:document:notFound → 404
-        return
-    }
-    ctx.JSON(doc)
+### 4.1 Produce your own error — `NewProblem`
+
+Status and title are **derived from the code's reason** (the taxonomy is the single source of
+truth for status), so you give the code and hand it to `ctx.Error`:
+
+```go
+ctx.Error(pkerrors.NewProblem("err:document:notFound"))                    // 404, title "Not found"
+ctx.Error(pkerrors.NewProblem("err:document:notFound",
+    pkerrors.WithDetail("document "+id+" expired")))                       // + internal-only detail
+ctx.Error(pkerrors.NewProblem("err:upload:invalid",
+    pkerrors.WithPublicDetail("the file must be a PDF")))                  // detail survives the public boundary
+```
+
+Options: `WithDetail` (internal-by-default), `WithPublicDetail` (survives the public boundary),
+`WithStatus`, `WithTitle`, `WithSource` (rare — the renderer fills it), `WithType`. The renderer
+fills `source` + `trace_id`; never set those by hand for your own errors. An error carrying a
+stable code via the `Coder` interface (`ErrorCode() string`) is rendered the same way.
+
+**A reason outside the taxonomy table needs `WithStatus`** — the **title then follows that
+status** (e.g. `WithStatus(409)` → "Conflict"), so `WithTitle` is optional; keep the precise code
+either way: `NewProblem("err:document:legalHold", pkerrors.WithStatus(409))`.
+
+### 4.2 DB result codes — `FromResultCode` / `HTTP`
+
+Map the DB layer's namespaced result codes (`result_error('err:document:notFound', …)`) to the
+mapped HTTP error and pass it to `ctx.Error`. **Never** return a raw DB error to the client.
+
+```go
+doc, code, err := r.Store().GetDocument(ctx, ctx.Params.String("id"))
+if err != nil {
+    ctx.Error(err)                            // unexpected — 500, logged, no leak
+    return
+}
+if code != "" {
+    ctx.Error(pkerrors.FromResultCode(code))  // e.g. err:document:notFound → 404
+    return
 }
 ```
 
-Reason → status (case-insensitive, `_`/`-` ignored): `notFound`→404, `forbidden`→403,
-`unauthorized`→401, `conflict`/`alreadyExists`→409, `expired`/`gone`→410,
-`invalid`→400, `required`→400. **Unknown/unmapped → 500 with a fixed safe message**
-(never leaks). Use `pkerrors.HTTP(domain, reason)` when classifying without a DB code.
-Auth-specific mappings stay in `go-authbyte`.
+Use `pkerrors.HTTP(domain, reason)` to classify without a DB code. Auth-specific mappings stay in
+`go-authbyte`.
+
+**Taxonomy — reason → status** (case-insensitive; `_`/`-`/space ignored):
+
+| reason (+ synonyms) | status | title |
+|---|---|---|
+| `notFound` / `missing` / `unknown` | 404 | Not found |
+| `unauthorized` / `unauthenticated` | 401 | Unauthorized |
+| `forbidden` / `denied` / `notAllowed` | 403 | Forbidden |
+| `conflict` / `alreadyExists` / `duplicate` | 409 | Conflict |
+| `gone` / `expired` / `revoked` | 410 | No longer available |
+| `invalid` / `validation` / `malformed` | 400 | Invalid request |
+| `required` / `missingParameter` | 400 | Missing required parameter |
+| *(reason outside the table)* | give `WithStatus`; title follows the status | |
+| *(unmapped code at the renderer)* | 500 | Internal server error (raw code never leaks) |
+
+Title-follows-status is defined for every standard status a service returns
+(400/401/403/404/409/410/413/415/422/429/501/502/503/504), so a `WithStatus` for a
+non-taxonomy reason still renders a sensible title without `WithTitle`.
+
+### 4.3 Relay a downstream error — never a bare 502
+
+When an outbound call fails, decode the downstream problem and **relay** it: preserve the terminal
+`code`/`source`/`trace_id`/`title`, append this service to the chain, and choose the outer status
+deliberately. Do **not** collapse a parsed failure into a generic 502.
+
+```go
+if down, ok := pkerrors.ParseProblem(respBody); ok {
+    ctx.Error(pkerrors.Relay(down, "portal-api", down.Status)) // relay status unchanged, or e.g. 424
+    return
+}
+ctx.Error(pkerrors.Relay(nil, "portal-api", fasthttp.StatusBadGateway)) // non-conforming upstream
+```
+
+The `chain` is bounded automatically (the root hop is always kept, the middle elided) — the full
+path is reconstructable from the logs by `trace_id`.
+
+### 4.4 The public boundary — `PublicErrors`
+
+The one public-facing service sets `platform.Options.PublicErrors: true` (§1). Its renderer emits
+the **public projection** (`PublicProblem`): `source` and `chain` are *structurally absent* and
+`detail` is withheld unless marked public-safe — a topology leak is impossible by construction, not
+by remembering to clear a field. Internal services leave it `false` and return the full envelope so
+a relaying service can attribute and extend it.
 
 ---
 
@@ -356,7 +437,7 @@ If it is not a genuine every-service concern, it does not belong in `go-platform
 | Bootstrap | `platform.Setup(app, Options)` | one call in `App.init()` after `server.New` |
 | Base config | `config.New()` / `*config.BaseConfiguration` | embed + `BaseConfiguration.Bind/Validate` |
 | Correlation | `correlation.ID/FromContext` | middleware auto-installed by Setup |
-| Errors | `errors.FromResultCode` / `errors.HTTP` | `ctx.Error(...)` maps to status + safe msg |
+| Errors | `errors.NewProblem` / `FromResultCode` / `ParseProblem`+`Relay` | one `problem+json` envelope; `ctx.Error(...)` renders + logs it |
 | Outbound | `httpclient.Outbound` + `CorrelationOptions` | over `ctx.HTTPClient()` |
 | Broker | `broker.NewPublisher` / `broker.Dispatch` | `Envelope`, idempotent consume |
 | Redaction | automatic | `ctx.Log()`; policy via `Options.Redaction` |

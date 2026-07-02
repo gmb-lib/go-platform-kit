@@ -56,6 +56,16 @@ func TestToProblem_FrameworkErrorUsesItsStatusAndSafeDetail(t *testing.T) {
 	qt.Check(t, qt.Equals(p.Detail, "malformed body"))
 }
 
+func TestToProblem_NormalizesEmptyProblem(t *testing.T) {
+	// A Problem with neither status nor code (e.g. a zero-value one built by
+	// hand) still normalizes to the safe, uniform 500 shape.
+	p := toProblem(&Problem{})
+
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusInternalServerError))
+	qt.Check(t, qt.Equals(p.Code, "err:internal:unexpected"))
+	qt.Check(t, qt.Equals(p.Title, "Internal server error"))
+}
+
 func TestStatusForError_ValidationIs422(t *testing.T) {
 	type payload struct {
 		Name string `validate:"required"`
@@ -74,17 +84,52 @@ func TestStatusForError_Fallbacks(t *testing.T) {
 
 func TestGenericCodeForStatus(t *testing.T) {
 	cases := map[int]string{
-		fasthttp.StatusNotFound:            "err:request:notFound",
-		fasthttp.StatusForbidden:           "err:request:forbidden",
-		fasthttp.StatusUnauthorized:        "err:request:unauthorized",
-		fasthttp.StatusConflict:            "err:request:conflict",
-		fasthttp.StatusBadGateway:          "err:upstream:unavailable",
-		fasthttp.StatusServiceUnavailable:  "err:upstream:unavailable",
-		fasthttp.StatusInternalServerError: "err:internal:unexpected",
-		fasthttp.StatusTeapot:              "err:internal:unexpected",
+		fasthttp.StatusBadRequest:            "err:request:invalid",
+		fasthttp.StatusUnauthorized:          "err:request:unauthorized",
+		fasthttp.StatusForbidden:             "err:request:forbidden",
+		fasthttp.StatusNotFound:              "err:request:notFound",
+		fasthttp.StatusConflict:              "err:request:conflict",
+		fasthttp.StatusGone:                  "err:request:gone",
+		fasthttp.StatusRequestEntityTooLarge: "err:request:payloadTooLarge",
+		fasthttp.StatusUnsupportedMediaType:  "err:request:unsupportedMediaType",
+		fasthttp.StatusUnprocessableEntity:   "err:request:unprocessable",
+		fasthttp.StatusTooManyRequests:       "err:request:rateLimited",
+		fasthttp.StatusNotImplemented:        "err:internal:notImplemented",
+		fasthttp.StatusBadGateway:            "err:upstream:unavailable",
+		fasthttp.StatusServiceUnavailable:    "err:upstream:unavailable",
+		fasthttp.StatusGatewayTimeout:        "err:upstream:unavailable",
+		fasthttp.StatusInternalServerError:   "err:internal:unexpected",
+		fasthttp.StatusTeapot:                "err:internal:unexpected",
 	}
 
 	for status, want := range cases {
 		qt.Check(t, qt.Equals(genericCodeForStatus(status), want), qt.Commentf("status %d", status))
+	}
+}
+
+func TestTitleForStatus_CoversEveryStandardStatus(t *testing.T) {
+	// title-from-status must hold for every standard status a service can
+	// return, so an emitter never has to override the title by hand just
+	// because the reason falls outside the taxonomy table.
+	cases := map[int]string{
+		fasthttp.StatusBadRequest:            "Bad request",
+		fasthttp.StatusUnauthorized:          "Unauthorized",
+		fasthttp.StatusForbidden:             "Forbidden",
+		fasthttp.StatusNotFound:              "Not found",
+		fasthttp.StatusConflict:              "Conflict",
+		fasthttp.StatusGone:                  "No longer available",
+		fasthttp.StatusRequestEntityTooLarge: "Payload too large",
+		fasthttp.StatusUnsupportedMediaType:  "Unsupported media type",
+		fasthttp.StatusUnprocessableEntity:   "Unprocessable entity",
+		fasthttp.StatusTooManyRequests:       "Too many requests",
+		fasthttp.StatusNotImplemented:        "Not implemented",
+		fasthttp.StatusBadGateway:            "Upstream unavailable",
+		fasthttp.StatusServiceUnavailable:    "Service unavailable",
+		fasthttp.StatusGatewayTimeout:        "Upstream timeout",
+		fasthttp.StatusTeapot:                "Internal server error",
+	}
+
+	for status, want := range cases {
+		qt.Check(t, qt.Equals(titleForStatus(status), want), qt.Commentf("status %d", status))
 	}
 }

@@ -59,6 +59,53 @@ func TestProblem_StatusAndSafeError(t *testing.T) {
 	qt.Check(t, qt.Equals(p.Error(), "err:document:notFound: internal detail"))
 }
 
+func TestProblem_StatusCodeDefaultsTo500WhenUnset(t *testing.T) {
+	// A Problem built by hand (not via NewProblem) with no Status still
+	// implements azugo's status interface safely.
+	qt.Check(t, qt.Equals((&Problem{}).StatusCode(), fasthttp.StatusInternalServerError))
+}
+
+func TestProblem_ErrorBranches(t *testing.T) {
+	// Code with neither detail nor title falls back to just the code.
+	qt.Check(t, qt.Equals((&Problem{Code: "err:document:notFound"}).Error(), "err:document:notFound"))
+	// No code: falls back to detail, then title, then empty.
+	qt.Check(t, qt.Equals((&Problem{Detail: "already signed"}).Error(), "already signed"))
+	qt.Check(t, qt.Equals((&Problem{Title: "Conflict"}).Error(), "Conflict"))
+	qt.Check(t, qt.Equals((&Problem{}).Error(), ""))
+}
+
+func TestNewProblem_WithType(t *testing.T) {
+	p := NewProblem("err:document:notFound", WithType("https://errors.example.com/not-found"))
+	qt.Check(t, qt.Equals(p.Type, "https://errors.example.com/not-found"))
+}
+
+func TestNewProblem_ZeroStatusOptionDefaultsTo500(t *testing.T) {
+	// A misuse guard: an option that explicitly zeroes Status still yields a
+	// valid, non-zero status rather than an invalid response line.
+	p := NewProblem("err:document:notFound", WithStatus(0))
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusInternalServerError))
+}
+
+func TestNewProblem_TitleForEveryTaxonomyReason(t *testing.T) {
+	cases := []struct {
+		code  string
+		title string
+	}{
+		{"err:document:notFound", "Not found"},
+		{"err:identity:forbidden", "Forbidden"},
+		{"err:session:unauthorized", "Unauthorized"},
+		{"err:envelope:conflict", "Conflict"},
+		{"err:envelope:expired", "No longer available"},
+		{"err:document:invalid", "Invalid request"},
+		{"err:document:required", "Missing required parameter"},
+	}
+
+	for _, c := range cases {
+		p := NewProblem(c.code)
+		qt.Check(t, qt.Equals(p.Title, c.title), qt.Commentf("title for %q", c.code))
+	}
+}
+
 // TestPublic_StripsSourceAndChainStructurally proves the public projection can
 // never carry the internal topology fields — they are absent from the type, so
 // the marshalled body has no source/chain keys regardless of what was set.

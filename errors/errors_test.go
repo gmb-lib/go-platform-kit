@@ -1,6 +1,7 @@
 package errors_test
 
 import (
+	stderrors "errors"
 	"testing"
 
 	"github.com/go-quicktest/qt"
@@ -94,4 +95,49 @@ func TestHTTP(t *testing.T) {
 	sc, ok := err.(statusCoder)
 	qt.Assert(t, qt.IsTrue(ok))
 	qt.Check(t, qt.Equals(sc.StatusCode(), fasthttp.StatusConflict))
+}
+
+func TestConflictError_Messages(t *testing.T) {
+	err := pkerrors.FromResultCode("err:envelope:conflict")
+	qt.Check(t, qt.Equals(err.Error(), "envelope conflict"))
+
+	se, ok := err.(safeErrorer)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Check(t, qt.Equals(se.SafeError(), "envelope conflict"))
+
+	// No resource label falls back to a generic message.
+	var empty pkerrors.ConflictError
+	qt.Check(t, qt.Equals(empty.Error(), "conflict"))
+}
+
+func TestGoneError_Messages(t *testing.T) {
+	err := pkerrors.FromResultCode("err:envelope:expired")
+	qt.Check(t, qt.Equals(err.Error(), "envelope no longer available"))
+
+	se, ok := err.(safeErrorer)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Check(t, qt.Equals(se.SafeError(), "envelope no longer available"))
+
+	// No resource label falls back to a generic message.
+	var empty pkerrors.GoneError
+	qt.Check(t, qt.Equals(empty.Error(), "no longer available"))
+}
+
+func TestInternalError_UnwrapAndError(t *testing.T) {
+	cause := stderrors.New("db timeout")
+	err := pkerrors.InternalError{Err: cause}
+
+	qt.Check(t, qt.Equals(err.Error(), "db timeout"))
+	qt.Check(t, qt.Equals(stderrors.Unwrap(err), cause))
+
+	var empty pkerrors.InternalError
+	qt.Check(t, qt.Equals(empty.Error(), "internal error"))
+}
+
+func TestFromResultCode_PreservesRawCauseInLogOnly(t *testing.T) {
+	// An unparseable code and an unrecognized reason both keep the raw code in
+	// the internal (log-side) error text — never in SafeError — so an operator
+	// can still find the offending code in the logs.
+	qt.Check(t, qt.Equals(pkerrors.FromResultCode("not-a-code").Error(), "not-a-code"))
+	qt.Check(t, qt.Equals(pkerrors.FromResultCode("err:document:teapot").Error(), "err:document:teapot"))
 }
