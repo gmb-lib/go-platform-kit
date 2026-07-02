@@ -85,6 +85,10 @@ redaction, **(3)** the correlation middleware, and **(4)** the uniform error ren
 every error response is one `application/problem+json` envelope, logged once and correlated. Call
 it **before** registering service routes so correlation and the renderer wrap them.
 
+> **⚠ HARD RULE — never call `opentelemetry.Use` yourself.** `platform.Setup` already enables tracing
+> (step 1); a second call double-registers the trace middleware. Configure tracing via `OTEL_*` env vars
+> only. Holds for every `go-platform-kit` service.
+
 Set `Options.PublicErrors: true` on the **one** public-facing boundary service (e.g. a BFF) so its
 error responses are projected to the public shape (`source`/`chain` dropped); leave it `false` on
 internal services so they return the full envelope for relay + logging (§4).
