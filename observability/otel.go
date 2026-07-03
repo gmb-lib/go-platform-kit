@@ -13,7 +13,12 @@ import (
 // The service name defaults to the app's AppName when not set via OTEL_SERVICE_NAME.
 // If no OTLP endpoint is configured the package returns a no-op task, so the
 // service starts cleanly and tracing is simply inert — no code change required.
-func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration) error {
+//
+// opts is forwarded to opentelemetry.Use as-is, so a service with instrumentation
+// needs beyond the framework's built-in router/HTTP-client/cache tracing (e.g. a
+// custom InstrumentationRecorder for DB query tracing) can supply it without
+// losing platform.Setup — most callers pass none.
+func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration, opts ...opentelemetry.Option) error {
 	if cfg == nil {
 		cfg = &opentelemetry.Configuration{}
 	}
@@ -24,7 +29,7 @@ func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration) error {
 		cfg.ServiceName = app.AppName
 	}
 
-	t, err := opentelemetry.Use(app, cfg)
+	t, err := opentelemetry.Use(app, cfg, opts...)
 	if err != nil {
 		return err
 	}

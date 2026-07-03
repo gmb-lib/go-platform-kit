@@ -97,7 +97,20 @@ func toProblem(err error) *Problem {
 	var coder Coder
 	if stderrors.As(err, &coder) {
 		if code := coder.ErrorCode(); code != "" {
-			np := NewProblem(code)
+			opts := make([]ProblemOption, 0, 1)
+
+			var rsc http.ResponseStatusCode
+			if stderrors.As(err, &rsc) {
+				// Guard against StatusCode() returning 0 (unset): WithStatus(0)
+				// would overwrite a status NewProblem already derived correctly
+				// from the taxonomy, and NewProblem's own zero-status fallback
+				// would then downgrade a well-known code to a bare 500.
+				if s := rsc.StatusCode(); s != 0 {
+					opts = append(opts, WithStatus(s))
+				}
+			}
+
+			np := NewProblem(code, opts...)
 			if se, ok := err.(azugo.SafeError); ok {
 				np.Detail = se.SafeError()
 			}

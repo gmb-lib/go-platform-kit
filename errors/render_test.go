@@ -38,6 +38,45 @@ func TestToProblem_CoderKeepsCodeAndDetail(t *testing.T) {
 	qt.Check(t, qt.Equals(p.Detail, "already signed"))
 }
 
+// codedErrorWithStatus is a stand-in for a domain error type carrying both a
+// stable code (Coder) and its own HTTP status (http.ResponseStatusCode) — the
+// dual-interface case toProblem must honor rather than silently re-deriving
+// the status from the taxonomy alone.
+type codedErrorWithStatus struct {
+	code   string
+	status int
+}
+
+func (e codedErrorWithStatus) Error() string     { return e.code }
+func (e codedErrorWithStatus) ErrorCode() string { return e.code }
+func (e codedErrorWithStatus) StatusCode() int   { return e.status }
+
+func TestToProblem_CoderWithResponseStatusCodeHonored(t *testing.T) {
+	p := toProblem(codedErrorWithStatus{code: "err:document:legalHold", status: fasthttp.StatusConflict})
+
+	qt.Check(t, qt.Equals(p.Code, "err:document:legalHold"))
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusConflict))
+	// legalHold has no taxonomy title (unrecognized reason), so it follows the
+	// overridden status, same as NewProblem's own documented behavior.
+	qt.Check(t, qt.Equals(p.Title, "Conflict"))
+}
+
+func TestToProblem_CoderWithZeroStatusCodeIgnored(t *testing.T) {
+	// A StatusCode() of 0 (unset) must not downgrade an already-correct
+	// taxonomy-derived status to 500.
+	p := toProblem(codedErrorWithStatus{code: "err:document:notFound", status: 0})
+
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusNotFound))
+}
+
+func TestToProblem_CoderOnlyBehaviorUnchanged(t *testing.T) {
+	// An error implementing only Coder (not ResponseStatusCode) must render
+	// exactly as before this change — pure taxonomy-derived status.
+	p := toProblem(codedError{code: "err:envelope:conflict"})
+
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusConflict))
+}
+
 func TestToProblem_BareErrorIsUniform500(t *testing.T) {
 	p := toProblem(stderrors.New("boom"))
 

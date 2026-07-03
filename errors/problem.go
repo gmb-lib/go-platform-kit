@@ -258,10 +258,29 @@ func titleForCodeOK(code string) (string, bool) {
 	return titleForReasonOK(c.Reason)
 }
 
-// titleForReasonOK maps a taxonomy reason to a stable, human-readable title,
-// using the same normalization as the status mapping so the two never diverge.
-// ok is false for an unrecognized reason (the title then follows the status).
+// titleForReasonOK maps a taxonomy reason to a stable, human-readable title —
+// a built-in reason first, then a reason taught via RegisterReason. ok is
+// false for a reason recognized by neither (the title then follows the
+// status).
 func titleForReasonOK(reason string) (string, bool) {
+	if title, ok := builtinTitleForReasonOK(reason); ok {
+		return title, true
+	}
+
+	if spec, ok := lookupReason(reason); ok {
+		return spec.Title, true
+	}
+
+	return "", false
+}
+
+// builtinTitleForReasonOK maps a reason to a title using only the fixed,
+// non-overridable built-in taxonomy — never the RegisterReason registry. It
+// exists so RegisterReason's collision check tests against the built-in set
+// alone: reusing titleForReasonOK there would make re-registering an
+// already-registered custom reason panic with a misleading "collides with a
+// built-in" message.
+func builtinTitleForReasonOK(reason string) (string, bool) {
 	switch normalize(reason) {
 	case "notfound", "missing", "unknown", "doesnotexist":
 		return "Not found", true
