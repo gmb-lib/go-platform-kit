@@ -82,3 +82,36 @@ func TestRegisterReason_UnregisteredReasonStillFallsBackTo500(t *testing.T) {
 	p := NewProblem("err:credential:someUnregisteredReason")
 	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusInternalServerError))
 }
+
+// TestRegisterReason_RendersFullEnvelopeThroughHandler is the acceptance test
+// for the render path: a registered reason surfaced via FromResultCode/HTTP +
+// ctx.Error must render the same code and title as NewProblem(code), not a
+// genericized err:request:* code with a status-derived title. registeredError
+// carries the code (Coder) precisely so toProblem preserves it here — this is
+// the wire-level half of the AllEntryPointsAgree guarantee.
+func TestRegisterReason_RendersFullEnvelopeThroughHandler(t *testing.T) {
+	t.Cleanup(resetRegistry)
+	RegisterReason("proofInvalid", ReasonSpec{Status: fasthttp.StatusBadRequest, Title: "Invalid proof"})
+
+	// FromResultCode → ctx.Error path.
+	p := toProblem(FromResultCode("err:credential:proofInvalid"))
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusBadRequest))
+	qt.Check(t, qt.Equals(p.Code, "err:credential:proofInvalid"))
+	qt.Check(t, qt.Equals(p.Title, "Invalid proof"))
+
+	// HTTP(domain, reason) → ctx.Error path renders identically.
+	p = toProblem(HTTP("credential", "proofInvalid"))
+	qt.Check(t, qt.Equals(p.Status, fasthttp.StatusBadRequest))
+	qt.Check(t, qt.Equals(p.Code, "err:credential:proofInvalid"))
+	qt.Check(t, qt.Equals(p.Title, "Invalid proof"))
+}
+
+func TestRegisterReason_OutOfRangeStatusPanics(t *testing.T) {
+	t.Cleanup(resetRegistry)
+
+	defer func() {
+		qt.Check(t, qt.IsNotNil(recover()))
+	}()
+
+	RegisterReason("proofInvalid", ReasonSpec{Status: 0, Title: "Invalid proof"})
+}

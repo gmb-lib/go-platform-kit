@@ -89,6 +89,18 @@ it **before** registering service routes so correlation and the renderer wrap th
 > (step 1); a second call double-registers the trace middleware. Configure tracing via `OTEL_*` env vars
 > only. Holds for every `go-platform-kit` service.
 
+**Need custom instrumentation** (e.g. DB query tracing) beyond the built-in router/HTTP-client/cache
+spans? Pass it through `Options.TracingOptions` — `Setup` forwards the `opentelemetry.Option` values to
+the one `opentelemetry.Use` it owns, so you keep `Setup` instead of dropping to a hand-rolled `Use`
+(the hard rule above). Most services leave it nil.
+
+```go
+platform.Setup(a.App, platform.Options{
+    Config:         a.config.BaseConfiguration,
+    TracingOptions: []opentelemetry.Option{opentelemetry.InstrumentationRecorder("db", dbRecorder)},
+})
+```
+
 Set `Options.PublicErrors: true` on the **one** public-facing boundary service (e.g. a BFF) so its
 error responses are projected to the public shape (`source`/`chain` dropped); leave it `false` on
 internal services so they return the full envelope for relay + logging (§4).
@@ -262,6 +274,37 @@ Use `pkerrors.HTTP(domain, reason)` to classify without a DB code. Auth-specific
 Title-follows-status is defined for every standard status a service returns
 (400/401/403/404/409/410/413/415/422/429/501/502/503/504), so a `WithStatus` for a
 non-taxonomy reason still renders a sensible title without `WithTitle`.
+
+#### 4.2.1 Extend the taxonomy — `RegisterReason`
+
+A service with many fine-grained, per-call-site reasons (`proofInvalid`, `signingCertUnavailable`, …)
+would otherwise repeat `WithStatus`/`WithTitle` at every call site — with nothing to stop two sites
+drifting to different statuses for the same code. Teach the taxonomy the reason **once**, at startup:
+
+```go
+func (a *App) init() error {
+    // BEFORE platform.Setup / any request.
+    pkerrors.RegisterReason("proofInvalid", pkerrors.ReasonSpec{Status: 400, Title: "Invalid proof"})
+    // …platform.Setup(…)…
+}
+```
+
+After that, all three entry points derive the same status **and** title for the code — and render
+identically on the wire, whether produced via `NewProblem("err:credential:proofInvalid")` or returned
+via `FromResultCode`/`HTTP` to `ctx.Error`:
+
+```json
+{ "code": "err:credential:proofInvalid", "status": 400, "title": "Invalid proof" }
+```
+
+Rules:
+- **Call once, at startup** (an `init()` or `App.init()` before `platform.Setup`); register each reason
+  from a **single site** — re-registering does not panic (last spec wins), so a second site silently
+  drifts, the very thing this removes.
+- Matching is case- and separator-insensitive (same as built-ins). Registering a **built-in** reason
+  **panics** (the built-in taxonomy is not overridable); a `Status` outside `100–599` **panics**.
+- **`Title` and any safe message are client-facing** (`Title` on the wire, the safe message becomes
+  `detail`) — keep them client-safe: no PII, secrets, or internal names, same as any `SafeError`.
 
 ### 4.3 Relay a downstream error — never a bare 502
 
