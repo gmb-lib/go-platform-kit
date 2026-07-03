@@ -3,8 +3,8 @@ module github.com/gmb-lib/go-platform-kit
 go 1.26
 
 require (
-	azugo.io/azugo v0.34.2
-	azugo.io/core v0.34.0
+	azugo.io/azugo v0.34.3
+	azugo.io/core v0.34.1
 	azugo.io/opentelemetry v0.33.1
 	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/go-playground/validator/v10 v10.30.3
