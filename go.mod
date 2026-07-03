@@ -3,8 +3,8 @@ module github.com/gmb-lib/go-platform-kit
 go 1.26
 
 require (
-	azugo.io/azugo v0.34.2
-	azugo.io/core v0.34.0
+	azugo.io/azugo v0.34.3
+	azugo.io/core v0.34.1
 	azugo.io/opentelemetry v0.33.1
 	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/go-playground/validator/v10 v10.30.3
@@ -14,6 +14,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/valyala/fasthttp v1.72.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
+	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.uber.org/zap v1.28.0
 )
@@ -62,7 +63,6 @@ require (
 	github.com/valyala/histogram v1.2.0 // indirect
 	go.elastic.co/ecszap v1.0.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.20.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0 // indirect

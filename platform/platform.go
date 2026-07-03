@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"azugo.io/azugo"
+	"azugo.io/opentelemetry"
 
 	"github.com/gmb-lib/go-platform-kit/config"
 	"github.com/gmb-lib/go-platform-kit/correlation"
@@ -45,6 +46,13 @@ type Options struct {
 	// internal services leave it false so service-to-service errors carry the
 	// full envelope for relay and logging.
 	PublicErrors bool
+
+	// TracingOptions are additional azugo.io/opentelemetry options passed
+	// through to opentelemetry.Use — e.g. InstrumentationRecorder for a
+	// service with custom instrumentation needs (DB query tracing, etc.)
+	// beyond the framework's built-in router/HTTP-client/cache tracing. Most
+	// services leave this nil.
+	TracingOptions []opentelemetry.Option
 }
 
 // Setup wires the cross-cutting concerns onto app, in the order they must run:
@@ -71,7 +79,7 @@ func Setup(app *azugo.App, opts Options) error {
 	}
 
 	// 1. OpenTelemetry tracing (enable, never re-implement).
-	if err := observability.EnableTracing(app, opts.Config.Telemetry); err != nil {
+	if err := observability.EnableTracing(app, opts.Config.Telemetry, opts.TracingOptions...); err != nil {
 		return err
 	}
 

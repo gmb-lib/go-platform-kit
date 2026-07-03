@@ -13,6 +13,7 @@ package errors
 
 import (
 	"strings"
+	"sync"
 
 	azugo "azugo.io/azugo"
 	"azugo.io/core/http"
@@ -113,6 +114,100 @@ func (InternalError) StatusCode() int { return fasthttp.StatusInternalServerErro
 // Unwrap exposes the wrapped error for errors.Is/As and logging.
 func (e InternalError) Unwrap() error { return e.Err }
 
+// ReasonSpec is a taxonomy entry: the HTTP status and stable title for a reason
+// registered via RegisterReason.
+type ReasonSpec struct {
+	Status int
+	Title  string
+}
+
+var (
+	registryMu sync.RWMutex
+	registry   = map[string]ReasonSpec{}
+)
+
+// RegisterReason extends the taxonomy with a reason beyond the built-in set, so
+// NewProblem(code), FromResultCode(code), and HTTP(domain, reason) all derive
+// status and title for a service-specific reason without WithStatus/WithTitle
+// at every call site — all three flow through mapReason, so they agree by
+// construction rather than by convention.
+//
+// Call it once, before serving any request (e.g. from an init() or from
+// App.init() before platform.Setup).
+//
+// Reason matching is case-insensitive and separator-insensitive, same as the
+// built-in set (see normalize). Registering a reason that collides with a
+// built-in reason after normalization panics — the built-in taxonomy is not
+// overridable, so err:domain:notFound keeps meaning the same thing everywhere.
+// A spec.Status outside the HTTP range (100–599) also panics: a ReasonSpec must
+// carry a real status, so a zero value can't silently render as "status": 0.
+//
+// Registering the same custom reason twice does not panic; the last spec wins.
+// Register each reason from a single site so two call sites can't drift to
+// different specs for the same code — the drift RegisterReason exists to remove.
+func RegisterReason(reason string, spec ReasonSpec) {
+	if spec.Status < 100 || spec.Status > 599 {
+		panic("errors: reason " + reason + " registered with an out-of-range HTTP status")
+	}
+
+	key := normalize(reason)
+	if _, builtin := builtinTitleForReasonOK(reason); builtin {
+		panic("errors: reason " + reason + " collides with a built-in taxonomy reason")
+	}
+
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry[key] = spec
+}
+
+// resetRegistry clears all registered reasons. Test-only: without it, a test
+// calling RegisterReason leaks state into every later test in the package.
+func resetRegistry() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry = map[string]ReasonSpec{}
+}
+
+// lookupReason returns the registered spec for a reason, if any. Safe to call
+// on every rendered error (mapReason's default case, and titleForReasonOK's) —
+// takes the read lock rather than relying on RegisterReason's "call at startup"
+// contract to avoid a data race.
+func lookupReason(reason string) (ReasonSpec, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	spec, ok := registry[normalize(reason)]
+
+	return spec, ok
+}
+
+// registeredError is the error mapReason returns for a reason taught via
+// RegisterReason. It carries the registered status through StatusCode() so
+// statusForCode (and therefore NewProblem) sees the same value FromResultCode
+// and HTTP do, and the code through ErrorCode() (Coder) so the renderer keeps
+// it instead of genericizing it — the single mapReason chokepoint is what keeps
+// all entry points from drifting apart.
+type registeredError struct {
+	code   string
+	status int
+	safe   string
+}
+
+func (e registeredError) Error() string { return e.safe }
+
+// SafeError returns a client-safe message.
+func (e registeredError) SafeError() string { return e.safe }
+
+// StatusCode returns the registered HTTP status.
+func (e registeredError) StatusCode() int { return e.status }
+
+// ErrorCode returns the stable err:domain:reason code so the renderer preserves
+// it (Coder). Combined with StatusCode, a registered reason surfaced via
+// HTTP/FromResultCode + ctx.Error renders the same code, status, and title as
+// NewProblem(code) — the render path agrees with the direct path, not just on
+// status.
+func (e registeredError) ErrorCode() string { return e.code }
+
 // FromResultCode maps a DB namespaced result code to the Azugo HTTP error type
 // the service should return. The optional safeMsg overrides the default
 // client-safe message for the mapped error where the type carries one.
@@ -154,6 +249,14 @@ func mapReason(c Code, safe string) error {
 	case "required", "missingparameter", "missingfield":
 		return azugo.ParamRequiredError{Name: c.Domain}
 	default:
+		if spec, ok := lookupReason(c.Reason); ok {
+			return registeredError{
+				code:   Prefix + ":" + c.Domain + ":" + c.Reason,
+				status: spec.Status,
+				safe:   resource(spec.Title, safe),
+			}
+		}
+
 		// An unrecognized reason is treated as an internal failure: never leak
 		// the raw code to the client.
 		return InternalError{Err: errString(Prefix + ":" + c.Domain + ":" + c.Reason)}

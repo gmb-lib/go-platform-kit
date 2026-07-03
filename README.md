@@ -57,11 +57,11 @@ tracing, and the correlation middleware installed.
 
 | Package | Owns |
 |---|---|
-| `platform` | `Setup(app, Options)` — the single bootstrap entrypoint |
+| `platform` | `Setup(app, Options)` — the single bootstrap entrypoint (incl. `TracingOptions` for custom instrumentation) |
 | `config` | `BaseConfiguration` + the standard fleet env |
 | `observability` | log redaction, metric naming, OpenTelemetry enablement (incl. bespoke HTTP-client tracing) |
 | `correlation` | `correlation_id`/`trace_id` middleware + context helpers |
-| `errors` | the uniform RFC 9457 `application/problem+json` error envelope — produce (`NewProblem`), relay (`ParseProblem`/`Relay`), the one-install renderer, the public projection, and the `err:domain:reason` taxonomy |
+| `errors` | the uniform RFC 9457 `application/problem+json` error envelope — produce (`NewProblem`), relay (`ParseProblem`/`Relay`), the one-install renderer, the public projection, and the `err:domain:reason` taxonomy (extend it with `RegisterReason`) |
 | `broker` | `Publisher`/`Dispatch` + `IdempotencyStore` over the frozen event envelope (at-least-once handling, mark-after-success dedup) |
 | `broker/natsbroker` | NATS JetStream concrete impl — publish `Transport` + durable pull `Consumer` + `Connect`/`EnsureStream`; **opt-in**, the only package importing `nats.go` |
 | `httpclient` | outbound defaults + correlation header propagation |
