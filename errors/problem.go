@@ -3,7 +3,7 @@ package errors
 import (
 	"encoding/json"
 
-	azugo "azugo.io/azugo"
+	corehttp "azugo.io/core/http"
 	"github.com/valyala/fasthttp"
 )
 
@@ -132,7 +132,7 @@ func (p *Problem) StatusCode() int {
 // the framework format it. The global Handler renders every error uniformly;
 // this keeps a Problem self-describing where the Handler is not installed.
 func (p *Problem) MarshalError(contentType string) (body []byte, ct string, ok bool) {
-	if contentType != azugo.ContentTypeJSON && contentType != ContentTypeProblemJSON {
+	if contentType != corehttp.ContentTypeJSON && contentType != ContentTypeProblemJSON {
 		return nil, "", false
 	}
 
