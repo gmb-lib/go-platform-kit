@@ -301,8 +301,12 @@ Rules:
 - **Call once, at startup** (an `init()` or `App.init()` before `platform.Setup`); register each reason
   from a **single site** — re-registering does not panic (last spec wins), so a second site silently
   drifts, the very thing this removes.
-- Matching is case- and separator-insensitive (same as built-ins). Registering a **built-in** reason
-  **panics** (the built-in taxonomy is not overridable); a `Status` outside `100–599` **panics**.
+- Matching is case- and separator-insensitive (same as built-ins). Registering a reason that
+  collides with a **built-in** reason after normalization **panics** by default (fail-fast against
+  accidental shadowing at startup). Pass `AllowBuiltinOverride()` to register it deliberately —
+  the registration then **takes precedence** over the built-in bucket (e.g. `not-found` gets its
+  own status/title instead of the built-in 404); anything left unregistered still falls through
+  to the built-in set (the no-registration fallback). A `Status` outside `100–599` **panics**.
 - **`Title` and any safe message are client-facing** (`Title` on the wire, the safe message becomes
   `detail`) — keep them client-safe: no PII, secrets, or internal names, same as any `SafeError`.
 
