@@ -24,7 +24,7 @@ func TestWithCorrelationID_EmptyIsNoOp(t *testing.T) {
 }
 
 func TestCorrelationID_NilAndAbsent(t *testing.T) {
-	qt.Check(t, qt.Equals(propagation.CorrelationID(nil), ""))
+	qt.Check(t, qt.Equals(propagation.CorrelationID(nil), "")) //nolint:staticcheck // deliberately passing a nil Context to assert nil-safety
 	qt.Check(t, qt.Equals(propagation.CorrelationID(context.Background()), ""))
 }
 

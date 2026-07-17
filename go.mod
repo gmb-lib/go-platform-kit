@@ -1,10 +1,10 @@
 module github.com/gmb-lib/go-platform-kit
 
-go 1.26
+go 1.26.5
 
 require (
-	azugo.io/azugo v0.35.1
-	azugo.io/core v0.35.1
+	azugo.io/azugo v0.36.1
+	azugo.io/core v0.36.0
 	azugo.io/opentelemetry v0.35.1
 	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/go-playground/validator/v10 v10.30.3
@@ -42,10 +42,10 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lafriks/http2 v0.6.1 // indirect
-	github.com/lafriks/pkcs8 v1.2.3 // indirect
+	github.com/lafriks/pkcs8 v1.2.4 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.23 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
@@ -78,8 +78,8 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
-	google.golang.org/grpc v1.82.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260715232425-e75dac1f907d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260715232425-e75dac1f907d // indirect
+	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
