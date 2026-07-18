@@ -1,6 +1,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"testing"
 
 	"azugo.io/core/http"
@@ -158,14 +159,16 @@ func TestRegisterReason_TakesPrecedenceOverCollidingBuiltin(t *testing.T) {
 
 	err := FromResultCode("err:registry:not_found")
 
-	registered, ok := err.(registeredError)
+	var registered registeredError
+	ok := stderrors.As(err, &registered)
 	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("expected a registeredError for a reason registered over a built-in collision, got %T: %v", err, err))
 	qt.Check(t, qt.Equals(registered.ErrorCode(), "err:registry:not_found"))
 	qt.Check(t, qt.Equals(registered.StatusCode(), fasthttp.StatusTeapot))
 	qt.Check(t, qt.Equals(registered.SafeError(), "Registry entry not found"))
 
 	// HTTP(domain, reason) agrees.
-	httpErr, ok := HTTP("registry", "not_found").(registeredError)
+	var httpErr registeredError
+	ok = stderrors.As(HTTP("registry", "not_found"), &httpErr)
 	qt.Assert(t, qt.IsTrue(ok))
 	qt.Check(t, qt.Equals(httpErr.StatusCode(), fasthttp.StatusTeapot))
 
@@ -185,11 +188,13 @@ func TestRegisterReason_UnregisteredCollidingReasonStillUsesBuiltin(t *testing.T
 	t.Cleanup(resetRegistry)
 
 	err := FromResultCode("err:somedomain:not_found")
-	nf, ok := err.(http.NotFoundError)
+	var nf http.NotFoundError
+	ok := stderrors.As(err, &nf)
 	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("expected the built-in NotFoundError for an unregistered reason, got %T: %v", err, err))
 	qt.Check(t, qt.Equals(nf.StatusCode(), fasthttp.StatusNotFound))
 
-	_, ok = HTTP("somedomain", "not_found").(http.NotFoundError)
+	var notFoundError http.NotFoundError
+	ok = stderrors.As(HTTP("somedomain", "not_found"), &notFoundError)
 	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("HTTP(domain, reason) must agree with FromResultCode"))
 }
 
@@ -200,9 +205,11 @@ func TestRegisterReason_UnregisteredUnrecognizedReasonStillInternal(t *testing.T
 	t.Cleanup(resetRegistry)
 
 	err := FromResultCode("err:somedomain:teapot")
-	_, ok := err.(InternalError)
+	var internalError InternalError
+	ok := stderrors.As(err, &internalError)
 	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("expected InternalError for an unrecognized, unregistered reason, got %T: %v", err, err))
 
-	_, ok = HTTP("somedomain", "teapot").(InternalError)
+	var internalError2 InternalError
+	ok = stderrors.As(HTTP("somedomain", "teapot"), &internalError2)
 	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("HTTP(domain, reason) must agree with FromResultCode"))
 }

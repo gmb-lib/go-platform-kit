@@ -1,10 +1,6 @@
-# CANONICAL TEMPLATE — Go LIBRARY CI.
-# Copy verbatim into a library repo as .github/workflows/ci.yml.
-# Source of truth: shared/ci/templates/lib-ci.yml.
-#
-# Does: build · vet · golangci-lint · govulncheck · race tests + coverage, plus a
-# short fuzz sweep over any Fuzz* targets. Libraries publish via lib-release.yml,
-# not from here, so there is no image job.
+# CI for a Go library: build · vet · golangci-lint · govulncheck · race tests +
+# coverage, plus a short fuzz sweep over any Fuzz* targets. Publishing happens on
+# a GitHub release (release.yml), not here, so there is no image job.
 name: ci
 
 on:
@@ -49,7 +45,7 @@ jobs:
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4   # ADOPTION: replace with the current v4 commit SHA when copying
+        uses: actions/upload-artifact@v4   # pin to the current v4 commit SHA
         with:
           name: coverage
           path: coverage.out

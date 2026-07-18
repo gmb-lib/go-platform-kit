@@ -150,8 +150,8 @@ func TestPublisher_PublishStamped_PreservesStamp(t *testing.T) {
 
 	decoded := &broker.Envelope{}
 	qt.Assert(t, qt.IsNil(json.Unmarshal(tr.payload, decoded)))
-	qt.Check(t, qt.Equals(decoded.EventID, wantID))           // id not re-minted
-	qt.Check(t, qt.IsTrue(decoded.OccurredAt.Equal(wantAt)))  // time not shifted
+	qt.Check(t, qt.Equals(decoded.EventID, wantID))          // id not re-minted
+	qt.Check(t, qt.IsTrue(decoded.OccurredAt.Equal(wantAt))) // time not shifted
 }
 
 // TestPublisher_PublishStamped_RejectsUnstamped proves PublishStamped does NOT
@@ -163,7 +163,7 @@ func TestPublisher_PublishStamped_RejectsUnstamped(t *testing.T) {
 
 	err := pub.PublishStamped(context.Background(), "signing.events", validEnvelope())
 
-	qt.Check(t, qt.IsNotNil(err))            // rejected by Validate
+	qt.Check(t, qt.IsNotNil(err))              // rejected by Validate
 	qt.Check(t, qt.Equals(len(tr.payload), 0)) // nothing published
 }
 
