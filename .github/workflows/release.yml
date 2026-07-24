@@ -1,10 +1,7 @@
-# CANONICAL TEMPLATE — Go LIBRARY publish (on a GitHub Release).
-# Copy verbatim into a library repo as .github/workflows/release.yml.
-# Source of truth: shared/ci/templates/lib-release.yml.
-#
-# A Go module "publishes" by being tagged + reachable on the module proxy. This
-# gates on the same checks as CI, then warms proxy.golang.org and verifies the
-# tagged version is importable before declaring success.
+# Publish a Go module on a GitHub release: a module "publishes" by being tagged
+# and reachable on the module proxy. This gates on the same checks as CI, then
+# warms proxy.golang.org and verifies the tagged version is importable before
+# declaring success.
 name: release
 
 on:

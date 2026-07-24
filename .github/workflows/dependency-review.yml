@@ -1,10 +1,5 @@
-# CANONICAL TEMPLATE — dependency review on pull requests.
-# Copy verbatim into any repo (lib or service) as
-# .github/workflows/dependency-review.yml.
-# Source of truth: shared/ci/templates/dependency-review.yml.
-#
-# Flags a PR that adds a dependency with a known vulnerability or a disallowed
-# licence, before it merges.
+# Flags a pull request that adds a dependency with a known vulnerability or a
+# disallowed licence, before it merges.
 name: dependency-review
 
 on:
