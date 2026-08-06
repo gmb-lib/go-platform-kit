@@ -16,6 +16,7 @@ import (
 	"azugo.io/azugo"
 	"azugo.io/opentelemetry"
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -30,6 +31,11 @@ const (
 	// and every outbound client (including the on-behalf/background client that
 	// cannot import this package) share one name.
 	HeaderCorrelationID = propagation.HeaderCorrelationID
+
+	// HeaderAppInstanceID is the inbound calling-app-instance header. Unlike
+	// the correlation id it is never minted locally - an absent header simply
+	// means no app instance id is bound to the request.
+	HeaderAppInstanceID = propagation.HeaderAppInstanceID
 )
 
 // Log field keys. These are the canonical names that appear in every log line
@@ -38,7 +44,13 @@ const (
 	LogKeyCorrelationID = "correlation_id"
 	LogKeyTraceID       = "trace_id"
 	LogKeySpanID        = "span_id"
+	LogKeyAppInstanceID = "app_instance_id"
 )
+
+// appInstanceValueName is the per-request value name the middleware stores
+// the app instance id under, mirroring propagation.RequestValueName() for
+// the correlation id.
+const appInstanceValueName = "platform.app_instance_id"
 
 // MaxIDLength bounds an accepted inbound correlation id. Longer (or otherwise
 // invalid) inbound values are ignored and a fresh id is used instead — the
@@ -90,7 +102,7 @@ func Middleware() azugo.RequestHandlerFunc {
 			ctx.Header.SetAlways(HeaderCorrelationID, cid)
 
 			// 2. Ensure all available ids appear on every subsequent log line.
-			fields := make([]zap.Field, 0, 3)
+			fields := make([]zap.Field, 0, 4)
 			fields = append(fields, zap.String(LogKeyCorrelationID, cid))
 
 			if tid, sid, ok := traceIDs(ctx); ok {
@@ -100,7 +112,30 @@ func Middleware() azugo.RequestHandlerFunc {
 				)
 			}
 
+			// 3. App instance id: forwarded, never minted - bind it (for
+			// AppInstanceID(ctx) and outbound propagation) and put it on every
+			// log line, same as the correlation id, so it's searchable without
+			// digging into a specific outbound call's header attributes.
+			iid := strings.TrimSpace(ctx.Header.Get(HeaderAppInstanceID))
+			if iid != "" {
+				ctx.SetUserValue(appInstanceValueName, iid)
+				fields = append(fields, zap.String(LogKeyAppInstanceID, iid))
+			}
+
 			_ = ctx.AddLogFields(fields...)
+
+			// 4. Stamp both ids on the root span itself - Azugo's server-span
+			// builder does not capture arbitrary request headers (only the
+			// outbound http-client instrumentation does), so without this an
+			// id is visible only on whichever downstream call happens to carry
+			// it as a header, never on the request's own top-level span.
+			span := trace.SpanFromContext(opentelemetry.FromContext(ctx))
+			if span.IsRecording() {
+				span.SetAttributes(attribute.String(LogKeyCorrelationID, cid))
+				if iid != "" {
+					span.SetAttributes(attribute.String(LogKeyAppInstanceID, iid))
+				}
+			}
 
 			next(ctx)
 		}
@@ -125,6 +160,16 @@ func FromContext(ctx *azugo.Context) IDs {
 // not run.
 func ID(ctx *azugo.Context) string {
 	if v, ok := ctx.UserValue(propagation.RequestValueName()).(string); ok {
+		return v
+	}
+
+	return ""
+}
+
+// AppInstanceID returns the calling app instance id bound to the request, or
+// "" if Middleware has not run or no X-App-Instance-Id header was present.
+func AppInstanceID(ctx *azugo.Context) string {
+	if v, ok := ctx.UserValue(appInstanceValueName).(string); ok {
 		return v
 	}
 

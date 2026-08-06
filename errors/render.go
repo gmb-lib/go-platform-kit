@@ -3,6 +3,8 @@ package errors
 import (
 	"encoding/json"
 	stderrors "errors"
+	"strings"
+	"time"
 
 	azugo "azugo.io/azugo"
 	"azugo.io/core/http"
@@ -11,10 +13,35 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gmb-lib/go-platform-kit/correlation"
+	"github.com/gmb-lib/go-platform-kit/propagation"
 )
 
-// Handler returns the router error handler that renders every error — this
-// service's own or one relayed from downstream — as a uniform RFC 9457
+// HeaderAppInstanceID is the inbound header identifying the calling wallet
+// app instance. It rides through to FailureEvent.AppInstanceID for audit.
+const HeaderAppInstanceID = propagation.HeaderAppInstanceID
+
+// FailureEvent is the audit-worthy record of an error response returned to
+// a caller: which service produced it, at which endpoint, with what message,
+// status, and calling app instance. Handler invokes FailureHook with this
+// once per error, only at the service where the error originated - a relayed
+// downstream error is not re-audited at every hop it passes through.
+type FailureEvent struct {
+	Service       string
+	Endpoint      string
+	ErrorMessage  string
+	StatusCode    int
+	AppInstanceID string
+	OccurredAt    time.Time
+}
+
+// FailureHook is called by Handler for every error response this service
+// itself originates, so a caller can persist an audit record. It must not
+// panic and should swallow its own errors (log and continue) - it is a
+// best-effort side write, never allowed to affect the response.
+type FailureHook func(ctx *azugo.Context, evt FailureEvent)
+
+// Handler returns the router error handler that renders every error - this
+// service's own or one relayed from downstream - as a uniform RFC 9457
 // application/problem+json response. Installed once (see platform.Setup) it
 // replaces both the hand-rolled per-service error bodies and the framework's
 // default {"errors":[…]} shape, so the wire has exactly one error format.
@@ -28,7 +55,7 @@ import (
 //
 // It returns true (the response is fully written) for every non-nil error;
 // nil falls through to the framework.
-func Handler(source string, public bool) func(*azugo.Context, error) bool {
+func Handler(source string, public bool, hook FailureHook) func(*azugo.Context, error) bool {
 	return func(ctx *azugo.Context, err error) bool {
 		if err == nil {
 			return false
@@ -48,6 +75,26 @@ func Handler(source string, public bool) func(*azugo.Context, error) bool {
 		// log: it fires even when the handler wrote none, so an error is always
 		// joinable to its request by code + trace id.
 		logProblem(ctx, p)
+
+		// Audit only at the origin: p.Source names the service that produced the
+		// error (set above, or preserved from a downstream Problem - see
+		// Relay), so this is only true where the failure actually happened, not
+		// at every hop that relays it onward. Without this check a single
+		// downstream failure would be audited once per hop in the call chain.
+		if hook != nil && p.Source == source {
+			hook(ctx, FailureEvent{
+				Service:  p.Source,
+				Endpoint: ctx.RouterPath(),
+				// p.Error() falls back to Title (always set) when Detail
+				// (occurrence-specific, opt-in via WithDetail) is empty -
+				// most errors never set Detail, so using Detail alone here
+				// left error_message blank for the common case.
+				ErrorMessage:  p.Error(),
+				StatusCode:    p.StatusCode(),
+				AppInstanceID: strings.TrimSpace(ctx.Header.Get(HeaderAppInstanceID)),
+				OccurredAt:    time.Now(),
+			})
+		}
 
 		ctx.StatusCode(p.StatusCode())
 
