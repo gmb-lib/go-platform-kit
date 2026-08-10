@@ -3,7 +3,7 @@ package errors
 import (
 	"encoding/json"
 
-	azugo "azugo.io/azugo"
+	corehttp "azugo.io/core/http"
 	"github.com/valyala/fasthttp"
 )
 
@@ -132,7 +132,7 @@ func (p *Problem) StatusCode() int {
 // the framework format it. The global Handler renders every error uniformly;
 // this keeps a Problem self-describing where the Handler is not installed.
 func (p *Problem) MarshalError(contentType string) (body []byte, ct string, ok bool) {
-	if contentType != azugo.ContentTypeJSON && contentType != ContentTypeProblemJSON {
+	if contentType != corehttp.ContentTypeJSON && contentType != ContentTypeProblemJSON {
 		return nil, "", false
 	}
 
@@ -259,27 +259,30 @@ func titleForCodeOK(code string) (string, bool) {
 }
 
 // titleForReasonOK maps a taxonomy reason to a stable, human-readable title —
-// a built-in reason first, then a reason taught via RegisterReason. ok is
+// a reason taught via RegisterReason first, then a built-in reason. This
+// mirrors mapReason's precedence (registered wins over a built-in it
+// collides with after normalization), so NewProblem and
+// FromResultCode/HTTP never disagree on the title for the same code. ok is
 // false for a reason recognized by neither (the title then follows the
 // status).
 func titleForReasonOK(reason string) (string, bool) {
-	if title, ok := builtinTitleForReasonOK(reason); ok {
-		return title, true
-	}
-
 	if spec, ok := lookupReason(reason); ok {
 		return spec.Title, true
+	}
+
+	if title, ok := builtinTitleForReasonOK(reason); ok {
+		return title, true
 	}
 
 	return "", false
 }
 
-// builtinTitleForReasonOK maps a reason to a title using only the fixed,
-// non-overridable built-in taxonomy — never the RegisterReason registry. It
-// exists so RegisterReason's collision check tests against the built-in set
-// alone: reusing titleForReasonOK there would make re-registering an
-// already-registered custom reason panic with a misleading "collides with a
-// built-in" message.
+// builtinTitleForReasonOK maps a reason to a title using only the fixed
+// built-in taxonomy, never the RegisterReason registry. It is the fallback
+// titleForReasonOK consults once the registry has had first refusal, and the
+// set RegisterReason's collision guard tests against: reusing
+// titleForReasonOK there would make re-registering an already-registered
+// custom reason panic with a misleading "collides with a built-in" message.
 func builtinTitleForReasonOK(reason string) (string, bool) {
 	switch normalize(reason) {
 	case "notfound", "missing", "unknown", "doesnotexist":

@@ -126,6 +126,24 @@ var (
 	registry   = map[string]ReasonSpec{}
 )
 
+// RegisterOption configures a RegisterReason call.
+type RegisterOption func(*registerOptions)
+
+type registerOptions struct {
+	allowBuiltinOverride bool
+}
+
+// AllowBuiltinOverride permits registering a reason whose normalized form
+// collides with a built-in taxonomy reason. Without it such a registration
+// panics (fail-fast against accidental shadowing); with it the registration
+// succeeds and takes precedence over the built-in bucket — mapReason and the
+// title lookup consult the registry first. Passing the option is the
+// explicit, auditable statement that shadowing a built-in reason is
+// intentional; it has no effect on a non-colliding registration.
+func AllowBuiltinOverride() RegisterOption {
+	return func(o *registerOptions) { o.allowBuiltinOverride = true }
+}
+
 // RegisterReason extends the taxonomy with a reason beyond the built-in set, so
 // NewProblem(code), FromResultCode(code), and HTTP(domain, reason) all derive
 // status and title for a service-specific reason without WithStatus/WithTitle
@@ -136,28 +154,39 @@ var (
 // App.init() before platform.Setup).
 //
 // Reason matching is case-insensitive and separator-insensitive, same as the
-// built-in set (see normalize). Registering a reason that collides with a
-// built-in reason after normalization panics — the built-in taxonomy is not
-// overridable, so err:domain:notFound keeps meaning the same thing everywhere.
-// A spec.Status outside the HTTP range (100–599) also panics: a ReasonSpec must
-// carry a real status, so a zero value can't silently render as "status": 0.
+// built-in set (see normalize). A registered reason takes precedence over a
+// built-in reason it collides with after normalization: mapReason (and the
+// title lookup behind NewProblem) consult the registry before the built-in
+// buckets, so registering e.g. "not-found" gives that reason its own
+// status/title instead of the built-in "Not found"/404 bucket. Shadowing a
+// built-in must be explicit: a registration that collides with a built-in
+// reason panics unless the call passes AllowBuiltinOverride() — fail-fast
+// against accidental shadowing, while the option keeps a deliberate override
+// auditable at its call site. Anything left unregistered still falls through
+// to the built-in set unchanged. A spec.Status outside the HTTP range
+// (100–599) also panics: a ReasonSpec must carry a real status, so a zero
+// value can't silently render as "status": 0.
 //
 // Registering the same custom reason twice does not panic; the last spec wins.
 // Register each reason from a single site so two call sites can't drift to
 // different specs for the same code — the drift RegisterReason exists to remove.
-func RegisterReason(reason string, spec ReasonSpec) {
+func RegisterReason(reason string, spec ReasonSpec, opts ...RegisterOption) {
 	if spec.Status < 100 || spec.Status > 599 {
 		panic("errors: reason " + reason + " registered with an out-of-range HTTP status")
 	}
 
-	key := normalize(reason)
-	if _, builtin := builtinTitleForReasonOK(reason); builtin {
-		panic("errors: reason " + reason + " collides with a built-in taxonomy reason")
+	var o registerOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	if _, builtin := builtinTitleForReasonOK(reason); builtin && !o.allowBuiltinOverride {
+		panic("errors: reason " + reason + " collides with a built-in taxonomy reason; pass AllowBuiltinOverride() if the shadowing is intentional")
 	}
 
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	registry[key] = spec
+	registry[normalize(reason)] = spec
 }
 
 // resetRegistry clears all registered reasons. Test-only: without it, a test
@@ -169,7 +198,7 @@ func resetRegistry() {
 }
 
 // lookupReason returns the registered spec for a reason, if any. Safe to call
-// on every rendered error (mapReason's default case, and titleForReasonOK's) —
+// on every rendered error (mapReason's first check, and titleForReasonOK's) —
 // takes the read lock rather than relying on RegisterReason's "call at startup"
 // contract to avoid a data race.
 func lookupReason(reason string) (ReasonSpec, bool) {
@@ -232,7 +261,24 @@ func HTTP(domain, reason string, safeMsg ...string) error {
 
 // mapReason resolves a parsed code to a concrete Azugo-mappable error. Reason
 // matching is case-insensitive and normalizes common spelling variants.
+//
+// Precedence: a reason registered via RegisterReason is consulted FIRST and
+// wins even when its normalized form collides with a built-in bucket below —
+// registered reasons take precedence over mapReason's built-in convenience
+// buckets, never the other way around. The built-in buckets exist so a
+// service never has to call RegisterReason for the common cases; a service
+// registers a reason precisely to opt that specific err:domain:reason out of
+// a bucket and into its own status/title. Only a reason matching neither the
+// registry nor a built-in bucket falls to the final, unrecognized-reason case.
 func mapReason(c Code, safe string) error {
+	if spec, ok := lookupReason(c.Reason); ok {
+		return registeredError{
+			code:   Prefix + ":" + c.Domain + ":" + c.Reason,
+			status: spec.Status,
+			safe:   resource(spec.Title, safe),
+		}
+	}
+
 	switch normalize(c.Reason) {
 	case "notfound", "missing", "unknown", "doesnotexist":
 		return http.NotFoundError{Resource: resource(c.Domain, safe)}
@@ -249,14 +295,6 @@ func mapReason(c Code, safe string) error {
 	case "required", "missingparameter", "missingfield":
 		return azugo.ParamRequiredError{Name: c.Domain}
 	default:
-		if spec, ok := lookupReason(c.Reason); ok {
-			return registeredError{
-				code:   Prefix + ":" + c.Domain + ":" + c.Reason,
-				status: spec.Status,
-				safe:   resource(spec.Title, safe),
-			}
-		}
-
 		// An unrecognized reason is treated as an internal failure: never leak
 		// the raw code to the client.
 		return InternalError{Err: errString(Prefix + ":" + c.Domain + ":" + c.Reason)}
