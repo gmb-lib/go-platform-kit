@@ -15,6 +15,7 @@ import (
 
 	"azugo.io/azugo"
 	"azugo.io/core/http"
+	"github.com/valyala/fasthttp"
 
 	"github.com/gmb-lib/go-platform-kit/correlation"
 	"github.com/gmb-lib/go-platform-kit/propagation"
@@ -47,7 +48,7 @@ func CorrelationOptions(ctx *azugo.Context) []http.RequestOption {
 		opts = append(opts, http.WithHeader(correlation.HeaderCorrelationID, cid))
 	}
 
-	if iid := ctx.Header.Get(propagation.HeaderAppInstanceID); iid != "" {
+	if iid := correlation.AppInstanceID(ctx); iid != "" {
 		opts = append(opts, http.WithHeader(propagation.HeaderAppInstanceID, iid))
 	}
 
@@ -56,6 +57,24 @@ func CorrelationOptions(ctx *azugo.Context) []http.RequestOption {
 	}
 
 	return opts
+}
+
+// SetCorrelationHeaders sets the correlation_id and (when present) app
+// instance id headers directly on a raw fasthttp request header.
+//
+// Use this instead of CorrelationOptions when a client builds its request via
+// ctx.HTTPClient().NewRequest() rather than the option-based Client.Do*
+// helpers (e.g. to control body/content-type/auth headers by hand) — both
+// paths must forward the same two headers, so this is the one place that
+// knows how.
+func SetCorrelationHeaders(ctx *azugo.Context, header *fasthttp.RequestHeader) {
+	if cid := correlation.ID(ctx); cid != "" {
+		header.Set(correlation.HeaderCorrelationID, cid)
+	}
+
+	if iid := correlation.AppInstanceID(ctx); iid != "" {
+		header.Set(propagation.HeaderAppInstanceID, iid)
+	}
 }
 
 // Outbound returns the context-bound HTTP client targeting baseURL. The client

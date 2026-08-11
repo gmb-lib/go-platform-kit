@@ -47,11 +47,6 @@ const (
 	LogKeyAppInstanceID = "app_instance_id"
 )
 
-// appInstanceValueName is the per-request value name the middleware stores
-// the app instance id under, mirroring propagation.RequestValueName() for
-// the correlation id.
-const appInstanceValueName = "platform.app_instance_id"
-
 // MaxIDLength bounds an accepted inbound correlation id. Longer (or otherwise
 // invalid) inbound values are ignored and a fresh id is used instead — the
 // correlation id rides every log line, audit envelope, and outbound call, so
@@ -112,13 +107,19 @@ func Middleware() azugo.RequestHandlerFunc {
 				)
 			}
 
-			// 3. App instance id: forwarded, never minted - bind it (for
-			// AppInstanceID(ctx) and outbound propagation) and put it on every
-			// log line, same as the correlation id, so it's searchable without
-			// digging into a specific outbound call's header attributes.
+			// 3. App instance id: forwarded, never minted - validated the same
+			// way as the correlation id, since it rides the same log lines,
+			// span, and (via errors.FailureHook) an audit envelope. An invalid
+			// inbound value is simply no value, same as an absent header -
+			// bind it (for AppInstanceID(ctx) and outbound propagation) and put
+			// it on every log line so it's searchable without digging into a
+			// specific outbound call's headers.
 			iid := strings.TrimSpace(ctx.Header.Get(HeaderAppInstanceID))
+			if !ValidID(iid) {
+				iid = ""
+			}
 			if iid != "" {
-				ctx.SetUserValue(appInstanceValueName, iid)
+				ctx.SetUserValue(propagation.AppInstanceRequestValueName(), iid)
 				fields = append(fields, zap.String(LogKeyAppInstanceID, iid))
 			}
 
@@ -167,13 +168,12 @@ func ID(ctx *azugo.Context) string {
 }
 
 // AppInstanceID returns the calling app instance id bound to the request, or
-// "" if Middleware has not run or no X-App-Instance-Id header was present.
+// "" if Middleware has not run, no X-App-Instance-Id header was present, or
+// the header failed validation. Delegates to propagation.AppInstanceID so
+// this accessor and a context-only reader (see propagation.AppInstanceID)
+// resolve the identical bound value.
 func AppInstanceID(ctx *azugo.Context) string {
-	if v, ok := ctx.UserValue(appInstanceValueName).(string); ok {
-		return v
-	}
-
-	return ""
+	return propagation.AppInstanceID(ctx)
 }
 
 // traceIDs extracts the active OpenTelemetry trace_id/span_id from the request,

@@ -104,7 +104,12 @@ func Setup(app *azugo.App, opts Options) error {
 	// and the request trace id, replacing both the hand-rolled error bodies and
 	// the framework's default error shape. app.AppName is the same service id
 	// already stamped on every log line, so the source has a single origin.
-	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, opts.PublicErrors, opts.OnFailure)
+	var hooks []pkerrors.FailureHook
+	if opts.OnFailure != nil {
+		hooks = append(hooks, opts.OnFailure)
+	}
+
+	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, opts.PublicErrors, hooks...)
 
 	return nil
 }

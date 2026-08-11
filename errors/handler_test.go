@@ -110,6 +110,7 @@ func TestHandler_PublicModeStripsSourceAndChain(t *testing.T) {
 func TestHandler_InvokesFailureHookForOwnError(t *testing.T) {
 	app := azugo.NewTestApp()
 	app.AppName = "document-svc"
+	app.Use(correlation.Middleware())
 
 	var got pkerrors.FailureEvent
 	var calls int
@@ -127,7 +128,7 @@ func TestHandler_InvokesFailureHookForOwnError(t *testing.T) {
 	defer app.Stop()
 
 	tc := app.TestClient()
-	resp, err := tc.Get("/boom", tc.WithHeader(pkerrors.HeaderAppInstanceID, "instance-abc"))
+	resp, err := tc.Get("/boom", tc.WithHeader(correlation.HeaderAppInstanceID, "instance-abc"))
 	qt.Assert(t, qt.IsNil(err))
 
 	defer fasthttp.ReleaseResponse(resp)
@@ -135,10 +136,62 @@ func TestHandler_InvokesFailureHookForOwnError(t *testing.T) {
 	qt.Check(t, qt.Equals(calls, 1))
 	qt.Check(t, qt.Equals(got.Service, "document-svc"))
 	qt.Check(t, qt.Equals(got.Endpoint, "/boom"))
+	qt.Check(t, qt.Equals(got.Method, "GET"))
+	qt.Check(t, qt.Equals(got.Code, "err:document:notFound"))
 	qt.Check(t, qt.Equals(got.ErrorMessage, "err:document:notFound: no such document"))
 	qt.Check(t, qt.Equals(got.StatusCode, fasthttp.StatusNotFound))
 	qt.Check(t, qt.Equals(got.AppInstanceID, "instance-abc"))
 	qt.Check(t, qt.IsFalse(got.OccurredAt.IsZero()))
+}
+
+func TestHandler_HostileAppInstanceIDIsDropped(t *testing.T) {
+	app := azugo.NewTestApp()
+	app.AppName = "document-svc"
+	app.Use(correlation.Middleware())
+
+	var got pkerrors.FailureEvent
+	hook := func(_ *azugo.Context, evt pkerrors.FailureEvent) { got = evt }
+	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, false, hook)
+
+	app.Get("/boom", func(ctx *azugo.Context) {
+		ctx.Error(pkerrors.NewProblem("err:document:notFound"))
+	})
+	app.Start(t)
+
+	defer app.Stop()
+
+	hostile := "<img src=x onerror=alert(1)>;DROP TABLE x;--"
+
+	tc := app.TestClient()
+	resp, err := tc.Get("/boom", tc.WithHeader(correlation.HeaderAppInstanceID, hostile))
+	qt.Assert(t, qt.IsNil(err))
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	qt.Check(t, qt.Equals(got.AppInstanceID, ""))
+}
+
+func TestHandler_RecoversPanickingHook(t *testing.T) {
+	app := azugo.NewTestApp()
+	app.AppName = "document-svc"
+
+	hook := func(_ *azugo.Context, _ pkerrors.FailureEvent) { panic("audit store down") }
+	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, false, hook)
+
+	app.Get("/boom", func(ctx *azugo.Context) {
+		ctx.Error(pkerrors.NewProblem("err:document:notFound"))
+	})
+	app.Start(t)
+
+	defer app.Stop()
+
+	resp, err := app.TestClient().Get("/boom")
+	qt.Assert(t, qt.IsNil(err))
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusNotFound))
+	qt.Check(t, qt.StringContains(string(resp.Header.ContentType()), pkerrors.ContentTypeProblemJSON))
 }
 
 func TestHandler_FailureHookErrorMessageFallsBackToTitleWithoutDetail(t *testing.T) {
