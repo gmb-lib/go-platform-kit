@@ -93,6 +93,48 @@ func TestPropagation_LogFields(t *testing.T) {
 	qt.Check(t, qt.Equals(str(entry.ContextMap()[correlation.LogKeyCorrelationID]), "corr-log"))
 }
 
+// TestPropagation_AppInstanceID covers "inbound header → ctx → log fields →
+// outbound header option", the same treatment as the correlation id, so an app
+// instance id is searchable in logs (not just buried in a specific outbound
+// call's header attributes).
+func TestPropagation_AppInstanceID(t *testing.T) {
+	app := azugo.NewTestApp()
+	app.Use(correlation.Middleware())
+	app.Get("/probe", func(ctx *azugo.Context) {
+		ctx.Log().Info("probe")
+		ctx.JSON(map[string]any{
+			"id":          correlation.AppInstanceID(ctx),
+			"opt_present": len(httpclient.CorrelationOptions(ctx)) == 2,
+		})
+	})
+	app.Start(t)
+
+	defer app.Stop()
+
+	obs, logs := observer.New(zap.InfoLevel)
+	qt.Assert(t, qt.IsNil(app.ReplaceLogger(zap.New(obs))))
+
+	tc := app.TestClient()
+	resp, err := tc.Get("/probe", tc.WithHeader(correlation.HeaderAppInstanceID, "instance-xyz"))
+	qt.Assert(t, qt.IsNil(err))
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	body, err := resp.BodyUncompressed()
+	qt.Assert(t, qt.IsNil(err))
+
+	m := map[string]any{}
+	qt.Assert(t, qt.IsNil(json.Unmarshal(body, &m)))
+	qt.Check(t, qt.Equals(str(m["id"]), "instance-xyz"))
+
+	present, _ := m["opt_present"].(bool)
+	qt.Check(t, qt.IsTrue(present))
+
+	entry, ok := findEntry(logs, "probe")
+	qt.Assert(t, qt.IsTrue(ok), qt.Commentf("expected a 'probe' log entry"))
+	qt.Check(t, qt.Equals(str(entry.ContextMap()[correlation.LogKeyAppInstanceID]), "instance-xyz"))
+}
+
 // TestMiddleware_GeneratesIDWhenAbsent: with no inbound header the correlation
 // id adopts Azugo's own per-request id (ctx.ID(), a 26-char ULID) and echoes it.
 func TestMiddleware_GeneratesIDWhenAbsent(t *testing.T) {

@@ -53,6 +53,13 @@ type Options struct {
 	// beyond the framework's built-in router/HTTP-client/cache tracing. Most
 	// services leave this nil.
 	TracingOptions []opentelemetry.Option
+
+	// OnFailure, when set, is called once for every error response this
+	// service itself originates (not one it merely relays from downstream -
+	// see pkerrors.Handler), so the service can persist an audit record. Left
+	// nil, no audit hook runs. go-platform-kit does not write the record
+	// itself - each service owns its own store and error taxonomy.
+	OnFailure pkerrors.FailureHook
 }
 
 // Setup wires the cross-cutting concerns onto app, in the order they must run:
@@ -97,7 +104,12 @@ func Setup(app *azugo.App, opts Options) error {
 	// and the request trace id, replacing both the hand-rolled error bodies and
 	// the framework's default error shape. app.AppName is the same service id
 	// already stamped on every log line, so the source has a single origin.
-	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, opts.PublicErrors)
+	var hooks []pkerrors.FailureHook
+	if opts.OnFailure != nil {
+		hooks = append(hooks, opts.OnFailure)
+	}
+
+	app.RouterOptions().ErrorHandler = pkerrors.Handler(app.AppName, opts.PublicErrors, hooks...)
 
 	return nil
 }
