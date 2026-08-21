@@ -16,6 +16,7 @@ import (
 	"azugo.io/azugo"
 	"azugo.io/opentelemetry"
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -30,6 +31,11 @@ const (
 	// and every outbound client (including the on-behalf/background client that
 	// cannot import this package) share one name.
 	HeaderCorrelationID = propagation.HeaderCorrelationID
+
+	// HeaderAppInstanceID is the inbound calling-app-instance header. Unlike
+	// the correlation id it is never minted locally - an absent header simply
+	// means no app instance id is bound to the request.
+	HeaderAppInstanceID = propagation.HeaderAppInstanceID
 )
 
 // Log field keys. These are the canonical names that appear in every log line
@@ -38,6 +44,7 @@ const (
 	LogKeyCorrelationID = "correlation_id"
 	LogKeyTraceID       = "trace_id"
 	LogKeySpanID        = "span_id"
+	LogKeyAppInstanceID = "app_instance_id"
 )
 
 // MaxIDLength bounds an accepted inbound correlation id. Longer (or otherwise
@@ -60,6 +67,21 @@ type IDs struct {
 // It must run after the azugo.io/opentelemetry middleware (so the active span is
 // available) — platform.Setup guarantees this ordering by enabling tracing
 // before installing this middleware.
+//
+// What it puts where, so a service adopting it knows what starts appearing in
+// its telemetry — none of this is individually opt-out:
+//
+//   - correlation_id on every log line, echoed as a response header, and set as
+//     an attribute on the request's own span;
+//   - trace_id/span_id on every log line, when tracing is active;
+//   - app_instance_id on every log line and as a span attribute, but only when
+//     the inbound request carried a valid X-App-Instance-Id header. With no
+//     caller sending that header the behaviour is invisible.
+//
+// Skipping the middleware entirely is the only way to opt out, and it costs the
+// correlation model; a service that does not install it also reports an empty
+// app instance id to errors.FailureHook, which is the correct fail-closed
+// behaviour rather than a bug.
 func Middleware() azugo.RequestHandlerFunc {
 	return func(next azugo.RequestHandler) azugo.RequestHandler {
 		return func(ctx *azugo.Context) {
@@ -90,7 +112,7 @@ func Middleware() azugo.RequestHandlerFunc {
 			ctx.Header.SetAlways(HeaderCorrelationID, cid)
 
 			// 2. Ensure all available ids appear on every subsequent log line.
-			fields := make([]zap.Field, 0, 3)
+			fields := make([]zap.Field, 0, 4)
 			fields = append(fields, zap.String(LogKeyCorrelationID, cid))
 
 			if tid, sid, ok := traceIDs(ctx); ok {
@@ -100,7 +122,36 @@ func Middleware() azugo.RequestHandlerFunc {
 				)
 			}
 
+			// 3. App instance id: forwarded, never minted - validated the same
+			// way as the correlation id, since it rides the same log lines,
+			// span, and (via errors.FailureHook) an audit envelope. An invalid
+			// inbound value is simply no value, same as an absent header -
+			// bind it (for AppInstanceID(ctx) and outbound propagation) and put
+			// it on every log line so it's searchable without digging into a
+			// specific outbound call's headers.
+			iid := strings.TrimSpace(ctx.Header.Get(HeaderAppInstanceID))
+			if !ValidID(iid) {
+				iid = ""
+			}
+			if iid != "" {
+				ctx.SetUserValue(propagation.AppInstanceRequestValueName(), iid)
+				fields = append(fields, zap.String(LogKeyAppInstanceID, iid))
+			}
+
 			_ = ctx.AddLogFields(fields...)
+
+			// 4. Stamp both ids on the root span itself - Azugo's server-span
+			// builder does not capture arbitrary request headers (only the
+			// outbound http-client instrumentation does), so without this an
+			// id is visible only on whichever downstream call happens to carry
+			// it as a header, never on the request's own top-level span.
+			span := trace.SpanFromContext(opentelemetry.FromContext(ctx))
+			if span.IsRecording() {
+				span.SetAttributes(attribute.String(LogKeyCorrelationID, cid))
+				if iid != "" {
+					span.SetAttributes(attribute.String(LogKeyAppInstanceID, iid))
+				}
+			}
 
 			next(ctx)
 		}
@@ -129,6 +180,15 @@ func ID(ctx *azugo.Context) string {
 	}
 
 	return ""
+}
+
+// AppInstanceID returns the calling app instance id bound to the request, or
+// "" if Middleware has not run, no X-App-Instance-Id header was present, or
+// the header failed validation. Delegates to propagation.AppInstanceID so
+// this accessor and a context-only reader (see propagation.AppInstanceID)
+// resolve the identical bound value.
+func AppInstanceID(ctx *azugo.Context) string {
+	return propagation.AppInstanceID(ctx)
 }
 
 // traceIDs extracts the active OpenTelemetry trace_id/span_id from the request,

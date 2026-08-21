@@ -14,9 +14,10 @@ configures and wraps them.
 > Read the **azugo-framework** skill first for app/route/config/handler structure. This
 > skill only covers the `go-platform-kit` delta on top of it.
 
-Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.34.x** +
-`azugo.io/core` **v0.34.x** + `azugo.io/opentelemetry` **v0.33.x** (bumped here once, inherited
-transitively).
+Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.37.x** +
+`azugo.io/core` **v0.37.x** + `azugo.io/opentelemetry` **v0.37.x** (bumped here once, inherited
+transitively). The `go` directive is a **floor**, not a pin — the module builds with any newer
+toolchain, and a consumer's own Go version is unaffected by it.
 
 ---
 
@@ -24,14 +25,14 @@ transitively).
 
 | Import | Owns |
 |---|---|
-| `…/platform` | `Setup(app, Options)` — the single bootstrap entrypoint |
+| `…/platform` | `Setup(app, Options)` — the single bootstrap entrypoint (`PublicErrors`, `TracingOptions`, `OnFailure`) |
 | `…/config` | `BaseConfiguration` (embeds Azugo config) + the standard env |
 | `…/observability` | logger redaction, metric naming helpers, `EnableTracing`, outbound HTTP-client tracing |
-| `…/correlation` | `correlation_id`/`trace_id` middleware + context helpers |
-| `…/errors` | the RFC 9457 `problem+json` envelope (`Problem`/`PublicProblem`), produce (`NewProblem`) + relay (`ParseProblem`/`Relay`), the uniform renderer, and the `err:domain:reason` taxonomy |
+| `…/correlation` | `correlation_id`/`trace_id` middleware + context helpers, and the forwarded `app_instance_id` (§3.1) |
+| `…/errors` | the RFC 9457 `problem+json` envelope (`Problem`/`PublicProblem`), produce (`NewProblem`) + relay (`ParseProblem`/`Relay`), the uniform renderer, the `err:domain:reason` taxonomy, and the `FailureHook` error-audit seam (§4.5) |
 | `…/broker` | `Publisher`/`Consumer` over the frozen event envelope |
-| `…/httpclient` | outbound defaults + correlation header propagation |
-| `…/propagation` | dependency-free leaf (stdlib only): carries the correlation id across a hop that only sees a `context.Context` — the on-behalf/DPoP client and background jobs |
+| `…/httpclient` | outbound defaults + correlation/app-instance header propagation (`CorrelationOptions`, `SetCorrelationHeaders`) |
+| `…/propagation` | dependency-free leaf (stdlib only): carries the correlation id **and the app instance id** across a hop that only sees a `context.Context` — the on-behalf/DPoP client and background jobs |
 
 ---
 
@@ -104,6 +105,9 @@ platform.Setup(a.App, platform.Options{
 Set `Options.PublicErrors: true` on the **one** public-facing boundary service (e.g. a BFF) so its
 error responses are projected to the public shape (`source`/`chain` dropped); leave it `false` on
 internal services so they return the full envelope for relay + logging (§4).
+
+Set `Options.OnFailure` only if the service keeps its own record of the errors it returns (§4.5).
+Left nil — the normal case — no hook runs and the path is inert.
 
 ---
 
@@ -198,6 +202,41 @@ func (r *router) handler(ctx *azugo.Context) {
 The same ids ride outbound HTTP (§5), broker events (§6), and the audit envelope
 (stamped by the emitter libraries) — so one incident is one correlated trail across logs,
 traces, and all three audit regimes. **Do not** build your own request-id scheme.
+
+### 3.1 App instance id — `X-App-Instance-Id`
+
+A caller may identify the **installation of the calling application** with an
+`X-App-Instance-Id` header. Where the correlation id answers "which request chain", this
+answers "which installation" — so one device's calls are findable across services and over
+time, which a per-request id cannot do.
+
+The middleware validates it exactly like the correlation id (bounded length, safe charset —
+`correlation.ValidID`) and then binds it once. Read it the same way:
+
+```go
+iid := correlation.AppInstanceID(ctx)              // "" when absent
+iid = propagation.AppInstanceID(someContext)       // from a context-only hop
+ctx2 := propagation.WithAppInstanceID(ctx, iid)    // for background work
+```
+
+Three rules that matter:
+
+- **Never minted locally.** No inbound header (or an invalid one) means *no* value — absent
+  is a supported state, and a service that does not install the middleware reports an empty
+  id, which is the correct fail-closed behaviour.
+- **Telemetry, not identity.** The value is opaque, client-supplied and unauthenticated.
+  Any caller can send anything. It must **never** be an input to an authorization, quota, or
+  trust decision, and it is not a device attestation.
+- **Never a metric or log label.** It is per-installation and unbounded, so as a Prometheus
+  label it multiplies every series by the number of devices. It belongs in the **log body**,
+  as a **span attribute**, and in a **table column** — which is exactly where the kit puts
+  it. Query it in Loki with `| json | app_instance_id="…"`.
+
+What the middleware puts where, none of it individually opt-out: `correlation_id` on every
+log line, echoed as a response header, and as a span attribute; `trace_id`/`span_id` on
+every log line when tracing is active; `app_instance_id` on every log line and as a span
+attribute **when the header was present**. With no caller sending it, the behaviour is
+invisible.
 
 ---
 
@@ -335,13 +374,53 @@ the **public projection** (`PublicProblem`): `source` and `chain` are *structura
 by remembering to clear a field. Internal services leave it `false` and return the full envelope so
 a relaying service can attribute and extend it.
 
+### 4.5 Auditing the errors you return — `FailureHook`
+
+A service that must keep a record of every error it returns sets **one** hook at bootstrap. The
+kit calls it and stores nothing itself — the service owns its store and its taxonomy:
+
+```go
+platform.Setup(a.App, platform.Options{
+    Config:    a.config.BaseConfiguration,
+    OnFailure: func(ctx *azugo.Context, evt pkerrors.FailureEvent) { audit.Queue(evt) },
+})
+```
+
+**Fired only at the origin.** The renderer compares the problem's `source` to this service, so a
+relayed downstream error is audited where it happened and *not* again at every hop that passes it
+on. Without that rule one failure would produce one row per hop in the chain.
+
+**`FailureEvent` is self-contained** — service, endpoint, router path, method, `err:domain:reason`
+code, message, status, app instance id, correlation id, trace id, and a UTC timestamp. That is
+deliberate: with the correlation and trace ids on the event, an audit row is one click into the
+logs and the trace instead of a search over a guessed time window, and a hook can hand the
+struct to a worker without ever touching the request context.
+
+Three rules for the hook body, all of them consequences of *where* it runs:
+
+- **It is synchronous, before the response is written.** Its latency is added to every error
+  response. Hand the event to a bounded queue and let a worker persist it; dropping on a full
+  queue beats delaying an error response. The most common cause of the 5xx you most want
+  audited is the database — write inline and the audit insert is slow or down exactly when the
+  service is already failing, on the same exhausted connection pool.
+- **`ctx` must not outlive the call.** It is pooled and released when the request completes.
+  Never retain it, never hand it to a goroutine, never use it as the context of a deferred
+  write — copy from the `FailureEvent`, which is sufficient on its own.
+- **Do not panic; swallow your own errors.** The renderer recovers a panicking hook and logs it,
+  but that guard exists because this code runs inside the framework's own panic recovery where a
+  second panic has no net above it — it is a backstop, not a contract to lean on.
+
+Router 404s do not reach the error handler, so unauthenticated scanner traffic does not drive
+rows through this path.
+
 ---
 
 ## 5. Outbound HTTP — correlation propagation
 
 For service-to-service calls use `ctx.HTTPClient()`, not a hand-rolled client.
-`go-platform-kit` adds the `correlation_id` header; W3C `traceparent` is injected
-automatically by `azugo.io/opentelemetry`; `go-authbyte` adds the DPoP-bound token.
+`go-platform-kit` adds the `correlation_id` header, and the `app_instance_id` header when the
+inbound request carried one; W3C `traceparent` is injected automatically by
+`azugo.io/opentelemetry`; `go-authbyte` adds the DPoP-bound token.
 
 ```go
 import "github.com/gmb-lib/go-platform-kit/httpclient"
@@ -349,12 +428,27 @@ import "github.com/gmb-lib/go-platform-kit/httpclient"
 func (c *DocumentClient) Fetch(ctx *azugo.Context, id string) (*Doc, error) {
     client := httpclient.Outbound(ctx, c.baseURL) // == ctx.HTTPClient().WithBaseURL(...)
     var doc Doc
-    opts := httpclient.CorrelationOptions(ctx) // propagate correlation_id (0 or 1 options)
+    opts := httpclient.CorrelationOptions(ctx) // correlation_id + app_instance_id (0-2 options)
     // opts = append(opts, authClient.AttachToken(ctx)) // go-authbyte attaches DPoP + token
     err := client.GetJSON("/v1/documents/"+id, &doc, opts...)
     return &doc, err
 }
 ```
+
+**Forwarding matters more than it looks.** The app instance id is never minted, so a hop that
+drops it makes the id stop at the edge service — and a failure audited deeper in the chain
+then records an empty instance, which is the one case the feature exists for. Any client that
+builds its own request instead of passing options must set both headers, and there is one
+helper that knows how so the two paths cannot drift:
+
+```go
+req := ctx.HTTPClient().NewRequest(...)          // hand-built: body, content-type, auth by hand
+httpclient.SetCorrelationHeaders(ctx, &req.Header) // correlation_id + app_instance_id
+```
+
+For work with no inbound request to inherit from — a background job kicked off by a
+device-originated call — carry the ids on the context instead
+(`propagation.WithCorrelationID` / `propagation.WithAppInstanceID`, §3.1).
 
 ### Bespoke clients that bypass `ctx.HTTPClient()`
 
@@ -488,7 +582,9 @@ If it is not a genuine every-service concern, it does not belong in `go-platform
 | Bootstrap | `platform.Setup(app, Options)` | one call in `App.init()` after `server.New` |
 | Base config | `config.New()` / `*config.BaseConfiguration` | embed + `BaseConfiguration.Bind/Validate` |
 | Correlation | `correlation.ID/FromContext` | middleware auto-installed by Setup |
+| App instance | `correlation.AppInstanceID` / `propagation.WithAppInstanceID` | forwarded, never minted; telemetry, never an authz input (§3.1) |
 | Errors | `errors.NewProblem` / `FromResultCode` / `ParseProblem`+`Relay` | one `problem+json` envelope; `ctx.Error(...)` renders + logs it |
-| Outbound | `httpclient.Outbound` + `CorrelationOptions` | over `ctx.HTTPClient()` |
+| Error audit | `Options.OnFailure` → `errors.FailureHook` | fires only where the error originates; non-blocking, `ctx` must not escape (§4.5) |
+| Outbound | `httpclient.Outbound` + `CorrelationOptions` (or `SetCorrelationHeaders`) | over `ctx.HTTPClient()`; forwards both ids |
 | Broker | `broker.NewPublisher` / `broker.Dispatch` | `Envelope`, idempotent consume |
 | Redaction | automatic | `ctx.Log()`; policy via `Options.Redaction` |
