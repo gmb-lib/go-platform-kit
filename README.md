@@ -9,7 +9,8 @@ and adds the project glue Azugo cannot know about (the correlation model linking
 to the three audit regimes, PII/secret log redaction, and the frozen broker event
 envelope). It re-implements none of Azugo's logger, metrics, or tracer.
 
-See [`SKILL.md`](./SKILL.md) for usage conventions.
+See [`SKILL.md`](./SKILL.md) for usage conventions, and [`CHANGELOG.md`](./CHANGELOG.md) for what
+each tag changes — read that before bumping the dependency.
 
 **Scope (a v1 commitment):** this kit targets [Azugo](https://azugo.io) services. Its
 entrypoints take `*azugo.App` / `*azugo.Context` by design, and it is version-pinned in
