@@ -3,6 +3,7 @@ package errors
 import (
 	"encoding/json"
 	stderrors "errors"
+	"time"
 
 	azugo "azugo.io/azugo"
 	"azugo.io/core/http"
@@ -13,8 +14,45 @@ import (
 	"github.com/gmb-lib/go-platform-kit/correlation"
 )
 
-// Handler returns the router error handler that renders every error — this
-// service's own or one relayed from downstream — as a uniform RFC 9457
+// FailureEvent is the audit-worthy record of an error response returned to
+// a caller: which service produced it, at which endpoint and method, with
+// what code/message, status, and calling app instance - plus the correlation
+// and trace ids so the row can be joined back to the logs and the trace.
+// Handler invokes FailureHook with this once per error, only at the service
+// where the error originated - a relayed downstream error is not re-audited
+// at every hop it passes through.
+type FailureEvent struct {
+	Service       string
+	Endpoint      string
+	Method        string
+	Code          string
+	ErrorMessage  string
+	StatusCode    int
+	AppInstanceID string
+	CorrelationID string
+	TraceID       string
+	OccurredAt    time.Time
+}
+
+// FailureHook is called by Handler for every error response this service
+// itself originates, so a caller can persist an audit record.
+//
+// It runs synchronously, on the response path, before the response is
+// written - a hook that performs an unbounded database write inline adds
+// that latency to every error response. Hand the event off to a bounded
+// queue and let a worker persist it instead.
+//
+// ctx is valid only for the duration of the call: it is pooled and released
+// once the request completes. Never retain it or hand it to a goroutine -
+// copy what is needed from FailureEvent, which is self-sufficient for that.
+//
+// It must not panic and should swallow its own errors (log and continue) -
+// Handler recovers a panicking hook, but that is a last resort, not a
+// contract to lean on.
+type FailureHook func(ctx *azugo.Context, evt FailureEvent)
+
+// Handler returns the router error handler that renders every error - this
+// service's own or one relayed from downstream - as a uniform RFC 9457
 // application/problem+json response. Installed once (see platform.Setup) it
 // replaces both the hand-rolled per-service error bodies and the framework's
 // default {"errors":[…]} shape, so the wire has exactly one error format.
@@ -28,7 +66,11 @@ import (
 //
 // It returns true (the response is fully written) for every non-nil error;
 // nil falls through to the framework.
-func Handler(source string, public bool) func(*azugo.Context, error) bool {
+//
+// hooks is variadic (rather than a single FailureHook) only to keep this
+// signature source-compatible for any existing two-argument caller; in
+// practice platform.Setup passes at most one.
+func Handler(source string, public bool, hooks ...FailureHook) func(*azugo.Context, error) bool {
 	return func(ctx *azugo.Context, err error) bool {
 		if err == nil {
 			return false
@@ -48,6 +90,15 @@ func Handler(source string, public bool) func(*azugo.Context, error) bool {
 		// log: it fires even when the handler wrote none, so an error is always
 		// joinable to its request by code + trace id.
 		logProblem(ctx, p)
+
+		// Audit only at the origin: p.Source names the service that produced the
+		// error (set above, or preserved from a downstream Problem - see
+		// Relay), so this is only true where the failure actually happened, not
+		// at every hop that relays it onward. Without this check a single
+		// downstream failure would be audited once per hop in the call chain.
+		if p.Source == source {
+			runFailureHooks(ctx, hooks, p)
+		}
 
 		ctx.StatusCode(p.StatusCode())
 
@@ -81,6 +132,56 @@ func Handler(source string, public bool) func(*azugo.Context, error) bool {
 
 		return true
 	}
+}
+
+// runFailureHooks builds the FailureEvent once and invokes every non-nil hook
+// with it. Each call is individually recovered: this runs inside azugo's own
+// panic-recovery path (Handler is reached from mux.Recv on a repanic), so a
+// panicking hook has no net above it left — left unguarded it would take the
+// worker goroutine, and the process, down. A consumer's audit write must
+// never be able to affect the response.
+func runFailureHooks(ctx *azugo.Context, hooks []FailureHook, p *Problem) {
+	if len(hooks) == 0 {
+		return
+	}
+
+	ids := correlation.FromContext(ctx)
+	evt := FailureEvent{
+		Service:  p.Source,
+		Endpoint: ctx.RouterPath(),
+		Method:   string(ctx.Method()),
+		Code:     p.Code,
+		// p.Error() falls back to Title (always set) when Detail
+		// (occurrence-specific, opt-in via WithDetail) is empty - most errors
+		// never set Detail, so using Detail alone here left error_message
+		// blank for the common case.
+		ErrorMessage:  p.Error(),
+		StatusCode:    p.StatusCode(),
+		AppInstanceID: correlation.AppInstanceID(ctx),
+		CorrelationID: ids.CorrelationID,
+		TraceID:       ids.TraceID,
+		OccurredAt:    time.Now(),
+	}
+
+	for _, hook := range hooks {
+		if hook == nil {
+			continue
+		}
+
+		invokeFailureHook(ctx, hook, evt)
+	}
+}
+
+// invokeFailureHook calls hook with a recover guard so a panicking consumer
+// audit write cannot escape into the framework's own panic-recovery path.
+func invokeFailureHook(ctx *azugo.Context, hook FailureHook, evt FailureEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			ctx.Log().Error("failure hook panicked", zap.Any("panic", r))
+		}
+	}()
+
+	hook(ctx, evt)
 }
 
 // toProblem coerces any error into a Problem: an existing Problem (produced here
