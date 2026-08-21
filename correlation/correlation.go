@@ -67,6 +67,21 @@ type IDs struct {
 // It must run after the azugo.io/opentelemetry middleware (so the active span is
 // available) — platform.Setup guarantees this ordering by enabling tracing
 // before installing this middleware.
+//
+// What it puts where, so a service adopting it knows what starts appearing in
+// its telemetry — none of this is individually opt-out:
+//
+//   - correlation_id on every log line, echoed as a response header, and set as
+//     an attribute on the request's own span;
+//   - trace_id/span_id on every log line, when tracing is active;
+//   - app_instance_id on every log line and as a span attribute, but only when
+//     the inbound request carried a valid X-App-Instance-Id header. With no
+//     caller sending that header the behaviour is invisible.
+//
+// Skipping the middleware entirely is the only way to opt out, and it costs the
+// correlation model; a service that does not install it also reports an empty
+// app instance id to errors.FailureHook, which is the correct fail-closed
+// behaviour rather than a bug.
 func Middleware() azugo.RequestHandlerFunc {
 	return func(next azugo.RequestHandler) azugo.RequestHandler {
 		return func(ctx *azugo.Context) {

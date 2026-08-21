@@ -17,11 +17,19 @@ import "context"
 // middleware echoes it, and every outbound client sets it.
 const HeaderCorrelationID = "X-Correlation-ID"
 
-// HeaderAppInstanceID is the HTTP header identifying the calling wallet app
-// instance. Unlike the correlation id it is never minted locally - it is only
-// ever read from an inbound request and, when present, forwarded unchanged on
-// outbound calls (package httpclient) so a failure audited at an internal
-// origin (see errors.FailureHook) still carries it.
+// HeaderAppInstanceID is the HTTP header carrying an identifier for the
+// installation of the calling application. Unlike the correlation id it is
+// never minted locally - it is only ever read from an inbound request and,
+// when present, forwarded unchanged on outbound calls (package httpclient) so
+// a failure audited at an internal origin (see errors.FailureHook) still
+// carries it.
+//
+// The value is opaque, client-supplied and unauthenticated: any caller can
+// send any value, and a valid-looking one proves nothing about the sender.
+// It is telemetry - it makes the calls of one installation findable in logs,
+// traces and audit rows - and it must never be an input to an authorization,
+// quota, or trust decision. Treat it as a hint about who called, never as a
+// claim about who they are.
 const HeaderAppInstanceID = "X-App-Instance-Id"
 
 // requestValueName is the per-request value name the inbound correlation

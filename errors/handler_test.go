@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"iter"
 	"testing"
+	"time"
 
 	"azugo.io/azugo"
 	"github.com/go-quicktest/qt"
@@ -142,6 +143,9 @@ func TestHandler_InvokesFailureHookForOwnError(t *testing.T) {
 	qt.Check(t, qt.Equals(got.StatusCode, fasthttp.StatusNotFound))
 	qt.Check(t, qt.Equals(got.AppInstanceID, "instance-abc"))
 	qt.Check(t, qt.IsFalse(got.OccurredAt.IsZero()))
+	// UTC by construction: an audit row stamped in the container's local time is
+	// a bug discovered months later, in another timezone, in front of an auditor.
+	qt.Check(t, qt.Equals(got.OccurredAt.Location(), time.UTC))
 }
 
 func TestHandler_HostileAppInstanceIDIsDropped(t *testing.T) {

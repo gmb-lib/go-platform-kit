@@ -160,7 +160,11 @@ func runFailureHooks(ctx *azugo.Context, hooks []FailureHook, p *Problem) {
 		AppInstanceID: correlation.AppInstanceID(ctx),
 		CorrelationID: ids.CorrelationID,
 		TraceID:       ids.TraceID,
-		OccurredAt:    time.Now(),
+		// UTC by construction, not by whichever timezone the container
+		// happens to run in - this timestamp ends up in a persisted audit
+		// row that will be read as evidence long after, and possibly from
+		// somewhere else. Same rule the broker applies to event times.
+		OccurredAt: time.Now().UTC(),
 	}
 
 	for _, hook := range hooks {
