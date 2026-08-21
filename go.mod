@@ -1,6 +1,6 @@
 module github.com/gmb-lib/go-platform-kit
 
-go 1.26.5
+go 1.26.6
 
 require (
 	azugo.io/azugo v0.36.1
