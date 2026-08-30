@@ -3,6 +3,55 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.10.0
+
+Additive: existing code compiles unchanged. One behaviour arrives on bump without any opt-in,
+listed under *Changed*.
+
+### Added
+
+- **A size cap for a JetStream stream.** `natsbroker.StreamConfig` gains `MaxBytes int64`
+  (0 = unlimited, unchanged from today's behaviour), so a sink whose durable record lives
+  somewhere else — its database — can bound the stream that is only its replay buffer. An
+  unbounded stream otherwise grows until it fills the node it runs on.
+
+  ```go
+  _ = conn.EnsureStream(ctx, natsbroker.StreamConfig{
+      Name: "AUDIT", Subjects: []string{"audit.>"}, Duplicates: 2 * time.Minute,
+      MaxBytes: 128 << 20, // at the cap the OLDEST messages are discarded
+  })
+  ```
+
+  Size it from the replay window you want, not from a guess at total volume: measure the bytes
+  your events actually take and multiply. Leave it 0 where the stream itself is the record.
+
+### Changed
+
+- **`EnsureStream` now sets the discard policy explicitly to old-first.** At the cap the oldest
+  messages are dropped and publishing keeps succeeding; the alternative — refusing the newest
+  events once the stream is full — is the failure mode a bounded copy of an audit trail must not
+  have. This matches what an unconfigured stream already did, so nothing changes for a stream
+  without a cap.
+
+- **The framework and telemetry dependencies move a minor: `azugo.io/azugo`, `azugo.io/core` and
+  `azugo.io/opentelemetry` → v0.38.x, OpenTelemetry → v1.46.0 (contrib v0.71.0), gRPC → v1.83.2.**
+  Nothing in this library's own surface changes with them — build, vet, tests, linter and
+  `go mod tidy -diff` all pass unchanged. Two things in the framework are worth knowing before you
+  bump, since you use it directly too:
+
+  - `user.Basic`'s `MarshalJSON` **moved to a pointer receiver**. A `Basic` *value* therefore no
+    longer satisfies `json.Marshaler`, so marshalling one by value silently produces default field
+    JSON instead of the custom form. Marshal `*Basic`. (Nothing in this library or in any service
+    we build uses that type — checked — but the failure is silent, not a compile error, which is
+    why it is called out.)
+  - `azugo.io/core` gains a **`password` package** (argon2id hashing with rehash detection). New
+    capability, nothing removed.
+
+- **`EnsureStream` was already create-*or-update*, and this is now stated and tested:** a limit
+  added to a stream that already exists takes effect at the sink's next start, without deleting
+  the stream. Verified against a real server, including that the cap holds, that the oldest
+  messages are the ones discarded, and that the newest survive.
+
 ## v1.9.0
 
 Additive: existing code compiles unchanged. Three behaviours do arrive on bump without any

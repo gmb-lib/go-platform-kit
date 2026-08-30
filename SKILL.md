@@ -14,8 +14,8 @@ configures and wraps them.
 > Read the **azugo-framework** skill first for app/route/config/handler structure. This
 > skill only covers the `go-platform-kit` delta on top of it.
 
-Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.37.x** +
-`azugo.io/core` **v0.37.x** + `azugo.io/opentelemetry` **v0.37.x** (bumped here once, inherited
+Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.38.x** +
+`azugo.io/core` **v0.38.x** + `azugo.io/opentelemetry` **v0.38.x** (bumped here once, inherited
 transitively). The `go` directive is a **floor**, not a pin — the module builds with any newer
 toolchain, and a consumer's own Go version is unaffected by it.
 
@@ -534,6 +534,7 @@ pub := broker.NewPublisher(natsbroker.NewTransport(conn), cfg.ServiceName)
 // Sink: ensure the stream, then run a durable pull consumer driving broker.Dispatch.
 _ = conn.EnsureStream(ctx, natsbroker.StreamConfig{
     Name: "AUDIT", Subjects: []string{"audit.>"}, Duplicates: 2 * time.Minute,
+    MaxBytes: 128 << 20, // 0 = unlimited; at the cap the OLDEST messages go
 })
 cons, _ := natsbroker.NewConsumer(ctx, conn, natsbroker.ConsumerConfig{
     Stream: "AUDIT", Durable: "eidas-audit", FilterSubject: "audit.signing",
@@ -544,6 +545,14 @@ _ = cons.Start(ctx) // success acks; any error naks → JetStream redelivers. St
 Connection material comes from the platform `Broker` config (`BROKER_URL` / `BROKER_TLS_*`).
 `Consumer` is framework-agnostic (`Start`/`Stop`), so the same code runs standalone or
 bundled inside another service's `core.Tasker`.
+
+**Bound the stream where the durable record lives elsewhere.** A stream whose events are also
+landed in a database is a replay buffer, and an unbounded one fills the node it runs on: give it
+`MaxBytes` (the sink's own env knob, so a deployment can size it) and leave the discard policy at
+old-first, which `EnsureStream` sets — the alternative is a full stream that refuses the newest
+events, the one failure a bounded audit copy must not have. Leave `MaxBytes` at 0 only where the
+stream itself *is* the record. `EnsureStream` **updates** a stream that already exists, so adding a
+cap takes effect at the next start of the sink; it does not need the stream deleted.
 
 ---
 
