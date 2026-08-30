@@ -143,15 +143,25 @@ func (c *Conn) Close() {
 // Duplicates window at least as long as the redelivery window, so the server
 // deduplicates by Msg-Id (the event id) as a backstop beneath the sink's own
 // event_id idempotency.
+//
+// MaxBytes bounds the stream's disk footprint where the durable record lives
+// elsewhere (the sink's database) and the stream is a replay buffer: at the cap
+// the OLDEST messages are discarded so publishing keeps succeeding. Leave it 0
+// only where the stream itself is the record — an unbounded stream fills the
+// node it runs on, and a full stream with the opposite discard policy would
+// start refusing the newest events instead.
 type StreamConfig struct {
 	Name       string        // e.g. "AUDIT"
 	Subjects   []string      // e.g. []string{"audit.>"}
 	MaxAge     time.Duration // 0 = unlimited
+	MaxBytes   int64         // 0 = unlimited; at the cap the oldest messages go
 	Duplicates time.Duration // server-side dedup window (e.g. 2m)
 }
 
 // EnsureStream idempotently creates or updates a file-backed stream. Typically
-// called once at startup by the sink that owns the subject space.
+// called once at startup by the sink that owns the subject space. An existing
+// stream is updated to match sc, so a limit added after a stream was created
+// takes effect on the next start — it does not need the stream deleted.
 func (c *Conn) EnsureStream(ctx context.Context, sc StreamConfig) error {
 	if c == nil || c.js == nil {
 		return errors.New("natsbroker: nil connection")
@@ -163,6 +173,8 @@ func (c *Conn) EnsureStream(ctx context.Context, sc StreamConfig) error {
 		Storage:    jetstream.FileStorage,
 		Retention:  jetstream.LimitsPolicy,
 		MaxAge:     sc.MaxAge,
+		MaxBytes:   maxBytes(sc.MaxBytes),
+		Discard:    jetstream.DiscardOld,
 		Duplicates: sc.Duplicates,
 	}
 
@@ -171,6 +183,18 @@ func (c *Conn) EnsureStream(ctx context.Context, sc StreamConfig) error {
 	}
 
 	return nil
+}
+
+// maxBytes translates our "0 = unlimited" convention into the value JetStream
+// spells unlimited with. Stated explicitly rather than relying on the server to
+// read a zero the way we mean it: on a size cap, the difference between "no
+// limit" and "a limit of nothing" is the whole stream.
+func maxBytes(v int64) int64 {
+	if v <= 0 {
+		return -1
+	}
+
+	return v
 }
 
 // Transport is the NATS JetStream implementation of broker.Transport. Publish
