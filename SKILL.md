@@ -14,8 +14,8 @@ configures and wraps them.
 > Read the **azugo-framework** skill first for app/route/config/handler structure. This
 > skill only covers the `go-platform-kit` delta on top of it.
 
-Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.37.x** +
-`azugo.io/core` **v0.37.x** + `azugo.io/opentelemetry` **v0.37.x** (bumped here once, inherited
+Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.38.x** +
+`azugo.io/core` **v0.38.x** + `azugo.io/opentelemetry` **v0.38.x** (bumped here once, inherited
 transitively). The `go` directive is a **floor**, not a pin — the module builds with any newer
 toolchain, and a consumer's own Go version is unaffected by it.
 
