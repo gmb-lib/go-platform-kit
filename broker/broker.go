@@ -117,6 +117,11 @@ func (p *Publisher) PublishStamped(ctx context.Context, topic string, ev *Envelo
 // the correlation_id/trace_id bound to the context. It also strips
 // bearer-token-shaped attribute keys — events carry correlation, never tokens.
 //
+// A nil request is allowed and means there is none — background work, which still
+// needs the id, the time and the token stripping, and simply has no correlation to
+// inherit. That matters because the stripping is the security-relevant half: a
+// caller who cannot call Stamp ends up hand-rolling the stamp and losing it.
+//
 // Mutation contract: Stamp mutates ev (that is its job), but it never mutates
 // the map the caller passed as Attributes — when stripping is needed, ev's
 // Attributes is replaced with a filtered copy, so a caller-owned map is safe to

@@ -3,6 +3,35 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.11.0
+
+Additive: existing code compiles and behaves unchanged. What changes is that one call which
+used to crash now works.
+
+### Fixed
+
+- **`broker.Stamp(nil, ev)` no longer panics.** It stamps the event and strips token-shaped
+  attribute keys as always, and simply leaves the correlation and trace ids empty — there is no
+  request to take them from. `correlation.FromContext(nil)` and `correlation.ID(nil)` return
+  their zero values for the same reason.
+
+  A nil request is not a mistake: background work — a scheduled sweep, a retention purge, an
+  outbox drainer — has no request, and that is an ordinary state. Until now it was a nil-pointer
+  dereference, so a background caller had no safe way to stamp an event at all and instead wrote
+  the fields by hand. That mattered more than the crash: **the stripping is the security-relevant
+  half of `Stamp`**, and a hand-rolled stamp is exactly where it gets left out.
+
+  ```go
+  // background work — no request to inherit correlation from
+  ev := &broker.Envelope{EventType: "document.retention_swept", Outcome: broker.OutcomeSuccess}
+  broker.Stamp(nil, ev)          // id + time + token stripping; correlation stays empty
+  _ = pub.PublishStamped(ctx, topic, ev)
+  ```
+
+  Nothing on the request path changes: with a real request every field is filled exactly as
+  before. If your code guarded against this by never calling `Stamp` off a request, that guard is
+  now unnecessary but harmless.
+
 ## v1.10.0
 
 Additive: existing code compiles unchanged. One behaviour arrives on bump without any opt-in,

@@ -161,7 +161,16 @@ func Middleware() azugo.RequestHandlerFunc {
 // FromContext returns the correlation triple bound to the request. The
 // correlation_id is always present once Middleware has run; trace_id/span_id are
 // present only when tracing is active for the request.
+//
+// A nil request yields the empty triple. Background work — a scheduled sweep, a
+// purge, an outbox drainer — has no request to inherit correlation from, and that
+// is an ordinary state rather than a fault: the caller gets empty ids and carries
+// on. Before this, a nil request dereferenced and took the caller down.
 func FromContext(ctx *azugo.Context) IDs {
+	if ctx == nil {
+		return IDs{}
+	}
+
 	ids := IDs{CorrelationID: ID(ctx)}
 
 	if tid, sid, ok := traceIDs(ctx); ok {
@@ -173,8 +182,12 @@ func FromContext(ctx *azugo.Context) IDs {
 }
 
 // ID returns the correlation id bound to the request, or "" if Middleware has
-// not run.
+// not run or there is no request (background work).
 func ID(ctx *azugo.Context) string {
+	if ctx == nil {
+		return ""
+	}
+
 	if v, ok := ctx.UserValue(propagation.RequestValueName()).(string); ok {
 		return v
 	}
