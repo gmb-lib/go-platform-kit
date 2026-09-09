@@ -3,6 +3,57 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.11.2
+
+Dependency maintenance: no source change in this library, and nothing here asks for a code change
+in yours. One upstream behaviour change is worth knowing before you deploy — see *Changed*.
+
+### Changed
+
+- **The framework and HTTP stack moved up.** `azugo.io/azugo`, `azugo.io/core` and
+  `azugo.io/opentelemetry` → **v0.38.1**, `github.com/valyala/fasthttp` → **v1.74.0**,
+  `github.com/go-playground/validator/v10` → **v10.30.4**. No source change was needed here: the
+  full gate is green on the new set — build, vet, `gofmt`, `go mod tidy -diff`, and `go test -race`
+  across all ten packages with **0 races**.
+
+- **The metrics endpoint no longer negotiates OpenMetrics.** This one is visible to your
+  monitoring, not to your code. Up to and including azugo v0.38.0 a scraper sending
+  `Accept: application/openmetrics-text` was answered with
+  `Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8` and the `# EOF`
+  terminator that format requires. From azugo **v0.38.1** the endpoint always answers
+  `Content-Type: text/plain; version=0.0.4; charset=utf-8` and writes no `# EOF`. **The metric
+  names, labels and values are unchanged** — only the content type and that trailing line.
+
+  It reaches you on bump with nothing to opt into, because this library binds azugo's metrics
+  configuration for every service that uses it. Prometheus, and anything else that accepts the
+  plain-text exposition format, keeps working untouched. **Check your scrape configuration before
+  you deploy** if it demands the OpenMetrics content type, or if it relies on `# EOF` to tell a
+  complete scrape from a truncated one. This was not a new capability being withdrawn after one
+  release: it was present in every azugo release from v0.32.0 onward.
+
+### Notes
+
+- **One module leaves the dependency graph and another joins it**, both transitively through
+  fasthttp: `github.com/andybalholm/brotli` is gone, and `github.com/molecule-man/go-brrr` v1.0.1
+  provides the brotli implementation in its place. Nothing in this library calls brotli directly,
+  so this matters only if you audit dependencies or keep a bill of materials. Also moved
+  indirectly: `klauspost/compress` → v1.20.0, and `golang.org/x/crypto` → v0.57.0, `x/net` →
+  v0.59.0, `x/sys` → v0.48.0, `x/text` → v0.42.0.
+
+- The wider fasthttp v1.74.0 release changes a great many files upstream. What is written above is
+  what was read and measured against *this* library — not a review of that release.
+
+## v1.11.1
+
+Repository housekeeping only. No library code changed, so a bump from v1.11.0 asks nothing of you.
+*(Written after the fact — the tag went out without an entry.)*
+
+### Notes
+
+- The repository gained a code of conduct, and the advisory DCO workflow was removed now that the
+  sign-off is enforced by the organisation's app together with a branch ruleset. What a
+  contribution has to carry is unchanged.
+
 ## v1.11.0
 
 Additive: existing code compiles and behaves unchanged. What changes is that one call which
