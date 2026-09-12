@@ -1,6 +1,6 @@
 module github.com/gmb-lib/go-platform-kit
 
-go 1.26.6
+go 1.27.0
 
 require (
 	azugo.io/azugo v0.38.1
@@ -46,7 +46,7 @@ require (
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/molecule-man/go-brrr v1.0.1 // indirect
+	github.com/molecule-man/go-brrr v1.1.0 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
@@ -83,8 +83,8 @@ require (
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260908043556-f8649ddbbfe6 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260908043556-f8649ddbbfe6 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260911204522-f61a6ca850bd // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260911204522-f61a6ca850bd // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
