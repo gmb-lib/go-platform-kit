@@ -1,6 +1,6 @@
 ---
 name: go-platform-kit
-description: Conventions for using github.com/gmb-lib/go-platform-kit — the thin glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements the azugo-framework skill (it does not replace it).
+description: Conventions for using github.com/gmb-lib/go-platform-kit — the thin glue over Azugo that every backend service imports so config, telemetry, errors, correlation, and broker access are wired identically. Use when bootstrapping a service (platform.Setup), defining the base configuration, adding the correlation model, mapping DB result codes to HTTP errors, propagating correlation on outbound HTTP, or publishing/consuming broker events with the event envelope. Complements azugo's own documentation (it does not replace it).
 ---
 
 # go-platform-kit — Project Glue Over Azugo
@@ -11,13 +11,12 @@ about: the correlation model, PII/secret log redaction, the broker event envelop
 the error taxonomy. It **re-implements none** of Azugo's logger, metrics, or tracer — it
 configures and wraps them.
 
-> Read the **azugo-framework** skill first for app/route/config/handler structure. This
-> skill only covers the `go-platform-kit` delta on top of it.
+> Read azugo's own documentation first for app/route/config/handler structure. This
+> file covers only what `go-platform-kit` adds on top of it.
 
-Module: `github.com/gmb-lib/go-platform-kit` · Pinned to `azugo.io/azugo` **v0.38.x** +
-`azugo.io/core` **v0.38.x** + `azugo.io/opentelemetry` **v0.38.x** (bumped here once, inherited
-transitively). The `go` directive is a **floor**, not a pin — the module builds with any newer
-toolchain, and a consumer's own Go version is unaffected by it.
+Module: `github.com/gmb-lib/go-platform-kit` · Requires `azugo.io/azugo`, `azugo.io/core` and `azugo.io/opentelemetry` at
+the minor in `go.mod` (v0.38 today). Like the `go` directive, that is a **floor**, not a pin — a
+consumer may run a newer azugo, and its own Go version is unaffected.
 
 ---
 
@@ -32,6 +31,7 @@ toolchain, and a consumer's own Go version is unaffected by it.
 | `…/errors` | the RFC 9457 `problem+json` envelope (`Problem`/`PublicProblem`), produce (`NewProblem`) + relay (`ParseProblem`/`Relay`), the uniform renderer, the `err:domain:reason` taxonomy, and the `FailureHook` error-audit seam (§4.5) |
 | `…/broker` | `Publisher`/`Consumer` over the frozen event envelope |
 | `…/httpclient` | outbound defaults + correlation/app-instance header propagation (`CorrelationOptions`, `SetCorrelationHeaders`) |
+| `…/web` | `PathParam(ctx, key)` — a route parameter decoded once (the router hands back the raw, still percent-encoded segment) |
 | `…/propagation` | dependency-free leaf (stdlib only): carries the correlation id **and the app instance id** across a hop that only sees a `context.Context` — the on-behalf/DPoP client and background jobs |
 
 ---
@@ -310,6 +310,12 @@ Use `pkerrors.HTTP(domain, reason)` to classify without a DB code. Auth-specific
 | *(reason outside the table)* | give `WithStatus`; title follows the status | |
 | *(unmapped code at the renderer)* | 500 | Internal server error (raw code never leaks) |
 
+**Through `FromResultCode` / `HTTP`, a built-in reason keeps its status but not its code or this title:** it
+returns a plain framework error, which renders the generic `err:request:<reason>` and the status title
+(`invalid` → "Bad request"), with the message in `detail`. To keep `err:<domain>:<reason>` and a chosen title,
+register the reason (§4.2.1) or produce the problem with `NewProblem`. The built-in buckets also accept
+`doesNotExist`, `accessDenied`, `notPermitted`, `exists`, `badRequest`, `badInput` and `missingField`.
+
 Title-follows-status is defined for every standard status a service returns
 (400/401/403/404/409/410/413/415/422/429/501/502/503/504), so a `WithStatus` for a
 non-taxonomy reason still renders a sensible title without `WithTitle`.
@@ -357,10 +363,10 @@ deliberately. Do **not** collapse a parsed failure into a generic 502.
 
 ```go
 if down, ok := pkerrors.ParseProblem(respBody); ok {
-    ctx.Error(pkerrors.Relay(down, "portal-api", down.Status)) // relay status unchanged, or e.g. 424
+    ctx.Error(pkerrors.Relay(down, "api-gateway", down.Status)) // relay status unchanged, or e.g. 424
     return
 }
-ctx.Error(pkerrors.Relay(nil, "portal-api", fasthttp.StatusBadGateway)) // non-conforming upstream
+ctx.Error(pkerrors.Relay(nil, "api-gateway", fasthttp.StatusBadGateway)) // non-conforming upstream
 ```
 
 The `chain` is bounded automatically (the root hop is always kept, the middle elided) — the full
