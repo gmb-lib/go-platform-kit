@@ -15,7 +15,7 @@ configures and wraps them.
 > file covers only what `go-platform-kit` adds on top of it.
 
 Module: `github.com/gmb-lib/go-platform-kit` · Requires `azugo.io/azugo`, `azugo.io/core` and `azugo.io/opentelemetry` at
-the minor in `go.mod` (v0.38 today). Like the `go` directive, that is a **floor**, not a pin — a
+the minor in `go.mod` (v0.40 today). Like the `go` directive, that is a **floor**, not a pin — a
 consumer may run a newer azugo, and its own Go version is unaffected.
 
 ---
