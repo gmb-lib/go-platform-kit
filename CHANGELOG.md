@@ -3,6 +3,57 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.11.4
+
+A security and dependency release with two things to act on: **this library now needs Go 1.27.2**,
+and it **requires azugo v0.40.0**, which your service inherits when it takes this version.
+
+### Changed
+
+- **The module declares `go 1.27.2`** (was `1.27.0`). Go 1.27.2 fixes standard-library
+  vulnerabilities that this library's code reaches under 1.27.0. `govulncheck` found nine it calls
+  before the move and none after it: GO-2026-6603, -6605, -6607, -6608, -6610, -6611, -6612, -6613
+  and -6617, in `net/http`, `crypto/tls`, `net/textproto` and `mime/multipart`, five of them also
+  through `golang.org/x/net`. Raise your own module's `go` directive to `1.27.2`; from there the go
+  command downloads and uses that toolchain by itself. CI that reads `go-version-file: go.mod`
+  follows with no workflow edit.
+
+- **`azugo.io/azugo`, `azugo.io/core` and `azugo.io/opentelemetry` move to v0.40.0** (were v0.38.1).
+  Nothing in this library's API changed with them, but a service that takes this version runs on
+  azugo v0.40.0 too. These are the azugo changes a service may notice:
+  - **Outbound calls stop at the request deadline.** `httpclient.Outbound` has always inherited the
+    inbound request's deadline; azugo now enforces that deadline on the call itself, where before a
+    slow upstream ran to completion and the deadline error was reported afterwards.
+  - **Cookies are found by their bare name.** With azugo's default cookie security, `Cookie.Get`,
+    `All` and `Keys` resolve a `__Host-` or `__Secure-` cookie by the name it was set under, and
+    `Clear` removes every prefixed variant the request carries.
+  - **A redirect after a non-GET request answers `303 See Other`** instead of `302 Found`, unless a
+    redirect status was already set.
+  - **The cache interface gained `Add`, `Swap`, `Expire`, `TTL` and `Sync`.** A type of your own that
+    implements it, a test fake included, needs those methods before it compiles.
+  - **The application creates one more cache at start**, for the new server-side flash helper, and
+    reads a new `flash` configuration section.
+  - **Strings in trace spans and log records are copied** out of reused request buffers, so an
+    attribute can no longer show another request's bytes. An unknown HTTP method is recorded as
+    `_OTHER`. A new setting, `OTEL_EXPORTER_OTLP_MAX_RESPONSE_SIZE`, bounds the exporter's response.
+
+### Notes
+
+- **Other dependencies moved:** `nats.go` → **v1.54.0**, `fasthttp` → **v1.75.0**, OpenTelemetry →
+  **v1.47.0**, with its log modules from v0.22.0 to **v1.47.0** now that the log API is stable,
+  gRPC → **v1.84.0** and `golang.org/x/net` → **v0.61.0**. None changes this library's behaviour.
+
+- **SKILL.md** now points to azugo's own documentation, documents `web.PathParam` (a route
+  parameter decoded once) and says how a built-in reason renders through `FromResultCode`. CI's
+  pinned GitHub Actions moved to their current commits.
+
+- **CI's linter moved to golangci-lint v2.14.0** (was v2.13.1). The earlier release cannot read Go 1.27.2's
+  compiled standard library and stops before linting anything. No code changed with it.
+
+- The gate is green on Go 1.27.2: `go mod verify`, `go mod tidy -diff`, build, vet, `gofmt`,
+  golangci-lint v2.14.0, and `go test -race` across all ten packages with **0 races**;
+  `govulncheck` reports nothing this library calls.
+
 ## v1.11.3
 
 Dependency maintenance with one thing to act on: **this library now needs Go 1.27**. No source
