@@ -3,6 +3,14 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.11.5
+
+Dependency maintenance. The module now requires Go 1.27.3 (was 1.27.2); CI follows the version
+in `go.mod`.
+
+- Updated Azugo to v0.40.2, Azugo Core and OpenTelemetry to v0.40.1, NATS to v1.55.0, and
+  fasthttp to v1.77.0, with their dependency graph refreshed.
+
 ## v1.11.4
 
 A security and dependency release with two things to act on: **this library now needs Go 1.27.2**,
