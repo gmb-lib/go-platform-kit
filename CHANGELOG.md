@@ -3,6 +3,18 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.11.6
+
+### Fixed
+
+- **The correlation id and the app instance id are now the request's own copies.** The correlation
+  middleware kept both ids as read off the request header, a view over the server's request
+  buffer, which is reused for the next request on the connection. Whatever kept an id past its
+  request (the request's span when tracing exports it after the handler, an audit record queued
+  for later delivery, a call a service makes in the background) could then carry another
+  request's id or garbled bytes. The middleware now binds copies. Update to take the fix; no code
+  change is needed.
+
 ## v1.11.5
 
 Dependency maintenance. The module now requires Go 1.27.3 (was 1.27.2); CI follows the version
