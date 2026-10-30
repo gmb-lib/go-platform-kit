@@ -239,6 +239,53 @@ func TestMiddleware_GeneratesIDWhenAbsent(t *testing.T) {
 	qt.Check(t, qt.Equals(string(resp.Header.Peek(correlation.HeaderCorrelationID)), string(body)))
 }
 
+// The inbound ids are read off the request's header buffer, which the server
+// reuses for the next request on the connection. What keeps an id past the
+// request (the request's span, a stamped audit record, a background call) must
+// still read this request's id, so the middleware binds copies of its own.
+func TestMiddleware_KeepsItsOwnCopyOfTheInboundIDs(t *testing.T) {
+	app := azugo.NewTestApp()
+	app.Use(correlation.Middleware())
+	app.Get("/probe", func(ctx *azugo.Context) {
+		reused := 0
+
+		for _, h := range []string{correlation.HeaderCorrelationID, correlation.HeaderAppInstanceID} {
+			buf := ctx.Request().Header.Peek(h)
+			copy(buf, strings.Repeat("x", len(buf))) // as the next request would
+			reused += len(buf)
+		}
+
+		ctx.JSON(map[string]any{
+			"reused":          reused,
+			"correlation_id":  correlation.ID(ctx),
+			"app_instance_id": correlation.AppInstanceID(ctx),
+		})
+	})
+	app.Start(t)
+
+	defer app.Stop()
+
+	tc := app.TestClient()
+	resp, err := tc.Get("/probe",
+		tc.WithHeader(correlation.HeaderCorrelationID, "corr-abc"),
+		tc.WithHeader(correlation.HeaderAppInstanceID, "instance-xyz"),
+	)
+	qt.Assert(t, qt.IsNil(err))
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	body, err := resp.BodyUncompressed()
+	qt.Assert(t, qt.IsNil(err))
+
+	m := map[string]any{}
+	qt.Assert(t, qt.IsNil(json.Unmarshal(body, &m)))
+
+	reused, _ := m["reused"].(float64)
+	qt.Assert(t, qt.Equals(int(reused), len("corr-abc")+len("instance-xyz")))
+	qt.Check(t, qt.Equals(str(m["correlation_id"]), "corr-abc"))
+	qt.Check(t, qt.Equals(str(m["app_instance_id"]), "instance-xyz"))
+}
+
 func findEntry(logs *observer.ObservedLogs, msg string) (observer.LoggedEntry, bool) {
 	for _, e := range logs.All() {
 		if e.Message == msg {

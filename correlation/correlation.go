@@ -97,6 +97,10 @@ func Middleware() azugo.RequestHandlerFunc {
 			if !ValidID(cid) {
 				cid = ""
 			}
+			// A copy: the header value is a view over the request buffer the
+			// server reuses for the next request on the connection, and the id
+			// outlives the request (the span, stamped records, background calls).
+			cid = strings.Clone(cid)
 			if cid == "" {
 				cid = ctx.ID()
 			}
@@ -133,6 +137,7 @@ func Middleware() azugo.RequestHandlerFunc {
 			if !ValidID(iid) {
 				iid = ""
 			}
+			iid = strings.Clone(iid) // a copy, as for the correlation id
 			if iid != "" {
 				ctx.SetUserValue(propagation.AppInstanceRequestValueName(), iid)
 				fields = append(fields, zap.String(LogKeyAppInstanceID, iid))
