@@ -89,7 +89,7 @@ func Handler(source string, public bool, hooks ...FailureHook) func(*azugo.Conte
 		// correlation id and trace id ride ctx.Log(). This is the uniform error
 		// log: it fires even when the handler wrote none, so an error is always
 		// joinable to its request by code + trace id.
-		logProblem(ctx, p)
+		logProblem(ctx, p, public)
 
 		// Audit only at the origin: p.Source names the service that produced the
 		// error (set above, or preserved from a downstream Problem - see
@@ -196,7 +196,12 @@ func invokeFailureHook(ctx *azugo.Context, hook FailureHook, evt FailureEvent) {
 func toProblem(err error) *Problem {
 	var p *Problem
 	if stderrors.As(err, &p) {
-		return normalized(p)
+		// A copy, because the renderer fills source and trace id in: a Problem kept in a
+		// variable and returned for many requests must not be written to, or carry the
+		// first request's trace id into the next. The slices inside are only read.
+		cp := *p
+
+		return normalized(&cp)
 	}
 
 	var coder Coder
@@ -301,7 +306,7 @@ func traceThread(ctx *azugo.Context) string {
 // view surfaces only genuine failures. The correlation id, trace id, and span
 // id are added by the correlation middleware (they ride ctx.Log()); this adds
 // the error specifics. detail is a SafeError, so it never leaks to the logs.
-func logProblem(ctx *azugo.Context, p *Problem) {
+func logProblem(ctx *azugo.Context, p *Problem, public bool) {
 	fields := make([]zap.Field, 0, 4)
 	fields = append(fields,
 		zap.String("error.code", p.Code),
@@ -312,6 +317,13 @@ func logProblem(ctx *azugo.Context, p *Problem) {
 	}
 	if p.Detail != "" {
 		fields = append(fields, zap.String("error.detail", p.Detail))
+	}
+
+	// A list dropped on the way in (the flag), one set by hand that the encoders will
+	// leave out, or, at the public edge, one with a reason word the kit does not know.
+	// Only read here.
+	if p.fieldErrorsDropped || !validFieldErrors(p.Errors) || (public && !forwardableFieldErrors(p.Errors)) {
+		fields = append(fields, zap.Bool("error.field_errors_dropped", true))
 	}
 
 	if p.Status >= fasthttp.StatusInternalServerError {

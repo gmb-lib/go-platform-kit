@@ -2,6 +2,7 @@ package errors
 
 import (
 	"encoding/json"
+	"slices"
 
 	corehttp "azugo.io/core/http"
 	"github.com/valyala/fasthttp"
@@ -43,6 +44,11 @@ type Problem struct {
 	// Code is the stable machine identifier the caller branches on
 	// (err:domain:reason). The middle segment is the domain, not the service.
 	Code string `json:"code"`
+	// Errors names the fields of the caller's own request that are at fault, as
+	// data (see FieldError). It carries no free text, and its type checks every
+	// list when it is written or read (see FieldErrors), so it is safe at the
+	// public boundary and survives a relay.
+	Errors FieldErrors `json:"errors,omitempty"`
 	// Source is the id of the service that originated the error. Internal only:
 	// stripped at the public boundary.
 	Source string `json:"source,omitempty"`
@@ -57,6 +63,10 @@ type Problem struct {
 	// It is set only by the emitter (WithPublicDetail); a Detail decoded from a
 	// downstream hop is treated as internal.
 	detailPublic bool
+
+	// fieldErrorsDropped records that a field list was refused as not valid, when it
+	// was set or decoded. The renderer notes it on the error's log line.
+	fieldErrorsDropped bool
 }
 
 // Hop is one step in a Problem's chain: the service that handled the error and
@@ -75,14 +85,19 @@ type Hop struct {
 // Source and Chain, so a public response cannot leak service topology no matter
 // how it is built. The public boundary renders this shape (see Problem.Public);
 // the strip is a property of the type, not a field a caller must remember to
-// clear.
+// clear. Problem.Public fills its field list from a Problem's only when the list is
+// valid and every reason word in it is one the kit may forward (RegisterFieldReason). A
+// PublicProblem built by hand is a plain data shape: its list is checked for shape when
+// it is written, never against the known words, just as its Detail is not checked at
+// all. Build one with Problem.Public.
 type PublicProblem struct {
-	Type    string `json:"type,omitempty"`
-	Title   string `json:"title"`
-	Status  int    `json:"status"`
-	Detail  string `json:"detail,omitempty"`
-	Code    string `json:"code"`
-	TraceID string `json:"trace_id,omitempty"`
+	Type    string      `json:"type,omitempty"`
+	Title   string      `json:"title"`
+	Status  int         `json:"status"`
+	Detail  string      `json:"detail,omitempty"`
+	Code    string      `json:"code"`
+	Errors  FieldErrors `json:"errors,omitempty"`
+	TraceID string      `json:"trace_id,omitempty"`
 }
 
 // Coder is implemented by an error that carries a stable err:domain:reason
@@ -145,7 +160,9 @@ func (p *Problem) MarshalError(contentType string) (body []byte, ct string, ok b
 }
 
 // Public returns the boundary projection: Source and Chain are dropped
-// structurally, and Detail is included only if the emitter marked it public-safe.
+// structurally, Detail is included only if the emitter marked it public-safe, and
+// the field list is kept when it is valid and every reason word in it is one the
+// kit may forward (see RegisterFieldReason).
 func (p *Problem) Public() *PublicProblem {
 	pp := &PublicProblem{
 		Type:    p.Type,
@@ -157,6 +174,12 @@ func (p *Problem) Public() *PublicProblem {
 
 	if p.detailPublic {
 		pp.Detail = p.Detail
+	}
+
+	// The list is forwarded only when it is valid and every reason in it is a word the
+	// kit knows (RegisterFieldReason); otherwise the whole list stays internal.
+	if clean, ok := cleanFieldErrors(p.Errors); ok && forwardableFieldErrors(clean) {
+		pp.Errors = clean
 	}
 
 	return pp
@@ -385,7 +408,7 @@ func ParseProblem(body []byte) (*Problem, bool) {
 	}
 
 	var p Problem
-	if err := json.Unmarshal(body, &p); err != nil {
+	if err := decodeProblem(body, &p); err != nil {
 		return nil, false
 	}
 
@@ -410,6 +433,7 @@ func Relay(down *Problem, service string, outerStatus int) *Problem {
 
 	p := *down
 	p.Status = outerStatus
+	p.Errors = slices.Clone(down.Errors)
 
 	// Seed the chain with the origin hop when the downstream did not carry one,
 	// so the root (where it failed) is always present.
