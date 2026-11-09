@@ -419,6 +419,45 @@ Three rules for the hook body, all of them consequences of *where* it runs:
 Router 404s do not reach the error handler, so unauthenticated scanner traffic does not drive
 rows through this path.
 
+### 4.6 Name the fields at fault — `WithFieldErrors`
+
+A client that sent a request with a field missing or wrong should be able to read **which field**
+and **why** as data. RFC 9457 §3.1.4 says a client "SHOULD NOT parse" `detail`, and §3.2 allows a
+problem type to carry extension members that clients ignore when they do not know them, so the
+envelope has one: `errors`, a list of `{ "field": 15, "reason": "required" }`.
+
+```go
+ctx.Error(pkerrors.NewProblem("err:form:invalid",
+    pkerrors.WithFieldErrors(
+        pkerrors.FieldError{Field: 15, Reason: "required"},
+    ),
+))
+```
+
+- **A field error carries no free text.** `Field` is the number the request already uses to
+  address the field (1 to 2147483647); `Reason` is a short stable word (`^[a-z][a-z0-9_]{0,31}$`).
+  A client that wants the field's name reads it from the request that lists the fields; nothing a
+  person wrote travels in the list. That is what lets it cross the public boundary.
+- **It is checked by its own type, whoever writes or reads it.** The list is an
+  `errors.FieldErrors`; at most 50 entries, each in range, none repeated. A list that breaks a rule,
+  from `WithFieldErrors`, from a hand-set `Problem.Errors`, or from a downstream body, is dropped
+  **whole**, never trimmed or partly kept: written as `null` (the public projection leaves the
+  member out) and read as no list. The rest of the error is sent as it was. This holds for
+  `encoding/json`, the framework's own encoder behind `ctx.JSON`, `ParseProblem` and the renderer
+  alike, and the renderer's one log line carries `error.field_errors_dropped` when it dropped one.
+  Prefer `WithFieldErrors`, which also copies your slice.
+- **It travels.** `Relay` keeps it on the internal envelope, and `Problem.Public()` (what
+  `PublicErrors` renders) keeps it while still dropping `source` and `chain`. A relaying service
+  needs no code of its own.
+- **The public edge forwards only words it knows.** Internal hops carry any well-formed `reason`,
+  but `Public()` forwards a list only when **every** word in it is registered, so a word naming
+  something inside a service cannot reach a client; one unknown word keeps the whole list
+  internal (and the log line carries `error.field_errors_dropped`). `required` is built in. In the
+  service that renders the public envelope, teach it the others once at start-up:
+  `pkerrors.RegisterFieldReason("too_long")`. A word that is not a short stable word panics there.
+- **Do not add a message to it.** Free text in the list would put the leak back that the check
+  exists to stop; say it in the `title` of the code, per condition (§4.1).
+
 ---
 
 ## 5. Outbound HTTP — correlation propagation

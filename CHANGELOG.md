@@ -3,6 +3,58 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.12.0
+
+### Added
+
+- **An error can name the fields of the request at fault, as data.** A client that sent a request
+  with a field empty or wrong used to learn only the error's title; the sentence naming the field
+  is `detail`, which is internal by default and which RFC 9457 §3.1.4 tells clients not to parse.
+  `Problem` and `PublicProblem` now carry `errors`, a list of `{"field": 15, "reason": "required"}`
+  (RFC 9457 §3.2 extension members; a client that does not know it ignores it). Set it with
+  `errors.WithFieldErrors(errors.FieldError{Field: 15, Reason: "required"})`. A field error is a
+  field number and a short stable word and nothing else. `Relay` keeps it on the internal
+  envelope. A service that only relays errors needs no code change to carry it.
+- **The public edge forwards only reason words it knows.** A downstream's reason words travel on
+  the internal envelope as long as they are well formed, but the public projection
+  (`Problem.Public()`, which `PublicErrors` renders) forwards a list only when **every** word in it
+  is known, so a word that names something inside a service never reaches a client; otherwise the
+  whole list stays internal and the error's log line carries `error.field_errors_dropped`.
+  `required` is built in. **To forward any other word, call
+  `errors.RegisterFieldReason("too_long")` once at start-up in the service that renders the
+  public envelope**, never from a package's `init` (the set is process-wide, like the one
+  `RegisterReason` keeps); it panics on a word that is not a short stable word. A public edge that
+  only ever relays `required` needs no change beyond taking this version. The check is
+  `Problem.Public()`'s: a `PublicProblem` you build by hand is a plain data shape, checked for
+  shape when written and never against the known words, as its `Detail` is not checked at all.
+
+### Fixed
+
+- **The renderer no longer writes into the `Problem` it is given.** It filled the service id and
+  the trace id into the caller's own value, so a `Problem` kept in a variable and returned for many
+  requests raced on that write, and every later response carried the trace id of the first request
+  that rendered it. It now renders a copy. Update to take the fix; no code change is needed.
+- **The list is checked by its own type, whoever writes or reads it.** The list is an
+  `errors.FieldErrors`, and its JSON methods enforce the rules: at most 50 entries, each field from
+  1 to 2147483647, each reason matching `^[a-z][a-z0-9_]{0,31}$`, no entry repeated. A list that
+  breaks a rule, set by hand or decoded from a downstream body, is never trimmed or partly kept: it
+  is written as `null` (`Problem.Public()` leaves the member out) and read as no list, and the rest
+  of the error is kept. `encoding/json`, the web framework's own encoder, `ParseProblem` and the
+  renderer all go through the same type, so a service that hands a `Problem` to `ctx.JSON` is held
+  to the rule too. The renderer notes a dropped list on the error's one log line as
+  `error.field_errors_dropped`; a path that does not log (`MarshalError`, `Public()` on its own)
+  drops it silently. `Problem` and `PublicProblem` get no JSON method of their own, so a type that
+  embeds either still writes and reads its other fields as before. One source-level exception: a
+  type that embeds a `Problem` next to another embedded struct that also has an `Errors` field now
+  has an ambiguous `Errors` selector, which stops it compiling, and loses that member on the wire;
+  give the type a field of its own to resolve it. An invalid list is written as a literal
+  `"errors":null` on the internal envelope, which a client that expects a list or nothing should
+  tolerate; `Problem.Public()` leaves the member out instead.
+- **A downstream's own `errors` member in another shape is dropped.** `ParseProblem` and a direct
+  decode into a `Problem` now read `errors` as this list only. A body that sends something else
+  under that name (RFC 9457's own validation example uses `detail` and `pointer`) is read as no
+  list, never as a decode failure, and `ParseProblem` notes the drop on the log line.
+
 ## v1.11.6
 
 ### Fixed

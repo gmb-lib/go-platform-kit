@@ -26,8 +26,11 @@ never national identifiers, names, or e-mail addresses.
 **Error envelope:** every service renders one RFC 9457 `application/problem+json` shape
 (`errors.Problem`) with a stable machine `code` (`err:domain:reason`); the public boundary projects
 it to a topology-free shape (`errors.PublicProblem`, dropping `source`/`chain`). It is
-**append-only** in the same spirit as the event envelope. See [`SKILL.md`](./SKILL.md) §4 for the
-produce/relay/render API.
+**append-only** in the same spirit as the event envelope. An error can name the fields of the
+request at fault as data (`errors`, a list of `{field, reason}`: a number and a short word, nothing
+free-text), which survives a relay, and the public projection when every reason word in it is one the edge
+knows (`RegisterFieldReason`). See [`SKILL.md`](./SKILL.md) §4 for
+the produce/relay/render API.
 
 ## Install
 
