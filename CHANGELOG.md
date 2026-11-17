@@ -3,6 +3,14 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.13.0
+
+**Requires Go 1.27.4** (was 1.27.3) **and brings Azugo v0.50.** No source change in this library: every exported symbol, signature and behaviour is as in v1.12.0.
+
+### Changed
+
+- **Azugo v0.50.2, Azugo Core v0.50.1, OpenTelemetry v0.50.0 and fasthttp v1.79.0**, with the remaining dependency graph refreshed. A service that takes this version inherits Azugo v0.50, so read what it changes for the service: `ctx.Body.Bytes()`, `ctx.Form.Values()`, `StringOptional()`, `FileOptional()` and `Files()` now return `(value, error)` and stop the build until the error is handled (answer it with `ctx.Error(err)`); the framework now holds a request body to a limit (the route's `ctx.SetMaxBodySize`, else `SERVER_MAX_REQUEST_BODY_SIZE`, else 4 MiB) and answers 413 over it, so a route that takes larger uploads must set its own; a form or multipart body is read only when a handler asks for it; a gzip multipart body is now held to the limit after unpacking (v0.50.2). `golang.org/x/crypto` moves to v0.59.0.
+
 ## v1.12.0
 
 ### Added
