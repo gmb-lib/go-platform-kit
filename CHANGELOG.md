@@ -3,6 +3,31 @@
 Notable changes to this library, newest first. Versions are git tags; this file is written
 for whoever bumps the dependency.
 
+## v1.14.0
+
+### Fixed
+
+- **No cache span carries the cache key any more.** Since OpenTelemetry for Azugo v0.50.0 (taken in v1.13.0), every
+  cache span the framework records carries the attribute `azugo.cache.key` with the whole key: for a session store
+  that is a session id, a one-time sign-in code or a refresh-token hash, written into the trace store. `EnableTracing`
+  (and so `platform.Setup`) now registers its own cache recorder ahead of the framework's. It records the same spans,
+  with the same names, the backend and instance attributes, the peer name and the failure status, and the same
+  `azugo.cache.gets` and `azugo.cache.hits` counts, but never the key. The in-memory cache still records no span. A
+  service's span name formatter still names the cache spans. Nothing to change in a service: bump and rebuild.
+  A recorder a service passes through `TracingOptions`, whether named for the cache's get, get-hit, set and delete
+  operations or a catch-all with no operations named, no longer runs for them: the kit answers every one of them,
+  outside a recorded request too. A span name formatter is still asked, and must not return the key (it is given it).
+  A failed operation's span still carries the error's text, as before; the cache's own errors name no key, but a
+  service's loader error or a stored value that fails to decode can put text from the service into it. Azugo Core's
+  per-instance `cache.SensitiveKeys()` option is still available and unaffected; it also covers the cache loader's
+  event, which nothing here traces.
+- **No rate-limit span is named after its key any more.** The framework names each rate-limit span
+  `<OPERATION> <key>`, and a limiter's key is a client's address or a person's subject. `EnableTracing` now records
+  the allow, peek, wait and reset operations itself: the span is named by the operation alone (`ALLOW`, `PEEK`,
+  `WAIT`, `RESET`), or by a service's span name formatter, with the same `ratelimit.allowed`,
+  `ratelimit.remaining` and `ratelimit.retry_after_ms` attributes and failure status. A recorder a service passes for
+  these operations, or a catch-all one, no longer runs for them.
+
 ## v1.13.0
 
 **Requires Go 1.27.4** (was 1.27.3) **and brings Azugo v0.50.** No source change in this library: every exported symbol, signature and behaviour is as in v1.12.0.

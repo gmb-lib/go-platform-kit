@@ -63,7 +63,7 @@ tracing, and the correlation middleware installed.
 |---|---|
 | `platform` | `Setup(app, Options)` — the single bootstrap entrypoint (incl. `TracingOptions` for custom instrumentation and `OnFailure` for the error-audit hook) |
 | `config` | `BaseConfiguration` + the standard fleet env |
-| `observability` | log redaction, metric naming, OpenTelemetry enablement (incl. bespoke HTTP-client tracing) |
+| `observability` | log redaction, metric naming, OpenTelemetry enablement (incl. bespoke HTTP-client tracing, and cache tracing that never records a cache key) |
 | `correlation` | `correlation_id`/`trace_id` middleware + context helpers, and the forwarded app instance id |
 | `errors` | the uniform RFC 9457 `application/problem+json` error envelope — produce (`NewProblem`), relay (`ParseProblem`/`Relay`), the one-install renderer, the public projection, the `err:domain:reason` taxonomy (extend it with `RegisterReason`), and the `FailureHook` fired for errors this service originates |
 | `broker` | `Publisher`/`Dispatch` + `IdempotencyStore` over the frozen event envelope (at-least-once handling, mark-after-success dedup) |
