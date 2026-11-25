@@ -3,6 +3,7 @@ package observability
 import (
 	"azugo.io/azugo"
 	"azugo.io/opentelemetry"
+	"go.opentelemetry.io/otel"
 )
 
 // EnableTracing performs the documented azugo.io/opentelemetry wiring once, with
@@ -18,6 +19,11 @@ import (
 // needs beyond the framework's built-in router/HTTP-client/cache tracing (e.g. a
 // custom InstrumentationRecorder for DB query tracing) can supply it without
 // losing platform.Setup — most callers pass none.
+//
+// The cache is traced by this package's own recorder, placed before opts, in the
+// framework's stead: the same spans and counts, never the key, which is often a
+// credential (a session id, a sign-in code). A recorder in opts for the cache's
+// operations therefore never runs for them.
 func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration, opts ...opentelemetry.Option) error {
 	if cfg == nil {
 		cfg = &opentelemetry.Configuration{}
@@ -29,7 +35,7 @@ func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration, opts ...ope
 		cfg.ServiceName = app.AppName
 	}
 
-	t, err := opentelemetry.Use(app, cfg, opts...)
+	t, err := opentelemetry.Use(app, cfg, append([]opentelemetry.Option{cacheTracing(otel.GetMeterProvider)}, opts...)...)
 	if err != nil {
 		return err
 	}
