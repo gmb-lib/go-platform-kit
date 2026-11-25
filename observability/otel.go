@@ -20,10 +20,14 @@ import (
 // custom InstrumentationRecorder for DB query tracing) can supply it without
 // losing platform.Setup — most callers pass none.
 //
-// The cache is traced by this package's own recorder, placed before opts, in the
-// framework's stead: the same spans and counts, never the key, which is often a
-// credential (a session id, a sign-in code). A recorder in opts for the cache's
-// operations therefore never runs for them.
+// The cache and the rate limiter are traced by this package's own recorders,
+// placed before opts, in the framework's stead: the same spans and counts,
+// never the key, which for a cache is often a credential (a session id, a
+// sign-in code) and for a rate limiter personal data (a client's address, a
+// person's subject). A recorder in opts for those operations, or a catch-all
+// one, therefore never runs for them. A span name formatter in opts is still
+// asked first and is handed the key among its arguments: it must name a span by
+// the operation and the instance, never by the key.
 func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration, opts ...opentelemetry.Option) error {
 	if cfg == nil {
 		cfg = &opentelemetry.Configuration{}
@@ -35,7 +39,8 @@ func EnableTracing(app *azugo.App, cfg *opentelemetry.Configuration, opts ...ope
 		cfg.ServiceName = app.AppName
 	}
 
-	t, err := opentelemetry.Use(app, cfg, append([]opentelemetry.Option{cacheTracing(otel.GetMeterProvider)}, opts...)...)
+	own := []opentelemetry.Option{cacheTracing(otel.GetMeterProvider), rateLimitTracing()}
+	t, err := opentelemetry.Use(app, cfg, append(own, opts...)...)
 	if err != nil {
 		return err
 	}

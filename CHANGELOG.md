@@ -21,6 +21,12 @@ for whoever bumps the dependency.
   service's loader error or a stored value that fails to decode can put text from the service into it. Azugo Core's
   per-instance `cache.SensitiveKeys()` option is still available and unaffected; it also covers the cache loader's
   event, which nothing here traces.
+- **No rate-limit span is named after its key any more.** The framework names each rate-limit span
+  `<OPERATION> <key>`, and a limiter's key is a client's address or a person's subject. `EnableTracing` now records
+  the allow, peek, wait and reset operations itself: the span is named by the operation alone (`ALLOW`, `PEEK`,
+  `WAIT`, `RESET`), or by a service's span name formatter, with the same `ratelimit.allowed`,
+  `ratelimit.remaining` and `ratelimit.retry_after_ms` attributes and failure status. A recorder a service passes for
+  these operations, or a catch-all one, no longer runs for them.
 
 ## v1.13.0
 
